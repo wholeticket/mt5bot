@@ -13,14 +13,16 @@ scale the point inputs to match.
 ## The model
 
 Two entries, one management rule. Both need a clean 5-minute tape. If more than
-about two thirds of the recent closes alternate color, the EA stands aside.
+about four fifths of the recent closes alternate color, the EA stands aside.
 
-**Continuation.** The 15-minute and 30-minute structure both have to be the
-same staircase: higher highs and higher lows, or lower highs and lower lows,
-with each step at least `InpMinSwingStepPoints` (default 20). Price pulls back
-into a fair value gap and the signal candle rejects it. The stop is the wick
-of that rejection. The target is the nearest unswept draw on liquidity in the
-trend direction.
+**Continuation.** The 15-minute structure has to be a staircase: higher highs
+and higher lows, or lower highs and lower lows. A pullback does not erase that
+staircase. The 30-minute chart blocks the trade only when it points the other
+way. One of the two latest steps has to be at least `InpMinSwingStepPoints`
+(default 20). Price pulls back into a fair value gap and the signal candle
+rejects it. The stop is the wick of that rejection. The target is the nearest
+unswept draw on liquidity in the trend direction, capped at twice the stop
+when that draw is farther away.
 
 **Inverse.** Used after a liquidity sweep and a market structure shift, and it
 takes priority over continuation while the shift is fresh
@@ -32,10 +34,10 @@ through, including every stacked gap still sitting between price and the
 target. The stop is a fixed `InpStopPoints` (default 40) from the fill.
 
 A fair value gap is the three-candle imbalance: the middle candle is at least
-`InpMinImbalancePoints` (default 40) and its body is at least
-`InpMinBodyFraction` of its range (default 0.70). The entry candle has to meet
-that same body test and travel at least `InpMinBouncePoints` (default 30).
-There must be at least `InpMinRoomPoints` (default 30) from the entry to the
+`InpMinImbalancePoints` (default 15) and its body is at least
+`InpMinBodyFraction` of its range (default 0.55). The entry candle has to meet
+that same body test and travel at least `InpMinBouncePoints` (default 8).
+There must be at least `InpMinRoomPoints` (default 12) from the entry to the
 target, and at least `InpMinRewardRisk` (default 1) units of reward per unit of
 risk. A gap with two or more recent closes sitting inside it is skipped.
 
@@ -54,8 +56,8 @@ aimed at a further level.
 
 New York time, on the clock of the bar that just closed:
 
-- Morning, 09:30 to 10:30
-- Afternoon, 13:00 to 16:00, and only if the morning did not produce a setup
+- Morning, 09:30 to 11:30, one filled trade
+- Afternoon, 13:00 to 16:00, one filled trade
 - Nothing from 11:30 to 13:00
 
 The whole New York day is blocked on the third Friday of the month, and on a
@@ -69,7 +71,7 @@ the economic calendar are not detected.
 
 ## Management and size
 
-The broker-side take profit is the liquidity level. At `InpPartialRewardRisk`
+The broker-side take profit is that target. At `InpPartialRewardRisk`
 (default 1), half the position is closed and the stop is moved to the fill.
 The remainder is left to the liquidity level. There is no trailing stop.
 

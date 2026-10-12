@@ -267,52 +267,73 @@ private:
         }
      }
 
-   // Last two highs and last two lows at or before not_after. Zero means the
-   // window has no staircase in either direction. The step minimum keeps a
-   // two-point higher high from counting as a trend.
-   int TrendAt(const IctSwing &swings[],const datetime not_after) const
+   // Keep swings that are at least one step away from the previous kept
+   // swing. A tiny pause inside a larger leg is not its own swing.
+   int CollectSeparated(const IctSwing &swings[],const datetime not_after,const bool want_high,
+                        IctSwing &out[],const int max_out) const
      {
-      double highs[2];
-      double lows[2];
-      int high_count=0;
-      int low_count=0;
-      for(int i=0; i<ArraySize(swings) && (high_count<2 || low_count<2); i++)
+      ArrayResize(out,0);
+      for(int i=0; i<ArraySize(swings) && ArraySize(out)<max_out; i++)
         {
          if(not_after>0 && swings[i].time>not_after)
             continue;
-         if(swings[i].is_high && high_count<2)
-           {
-            highs[high_count]=swings[i].price;
-            high_count++;
-           }
-         if(!swings[i].is_high && low_count<2)
-           {
-            lows[low_count]=swings[i].price;
-            low_count++;
-           }
+         if(swings[i].is_high!=want_high)
+            continue;
+         int kept=ArraySize(out);
+         if(kept>0 && MathAbs(swings[i].price-out[kept-1].price)<m_cfg.min_swing_step)
+            continue;
+         ArrayResize(out,kept+1);
+         out[kept]=swings[i];
         }
+      return ArraySize(out);
+     }
+
+   bool SeparatedSwing(const IctSwing &swings[],const datetime not_after,const bool want_high,
+                       IctSwing &recent,IctSwing &prior) const
+     {
+      IctSwing chain[];
+      if(CollectSeparated(swings,not_after,want_high,chain,2)<2)
+         return false;
+      recent=chain[0];
+      prior=chain[1];
+      return true;
+     }
+
+   // A continuation entry is the pullback, so the newest high is often lower
+   // while the prior staircase is still intact. That staircase stays the trend
+   // until a later swing steps through it.
+   int TrendAt(const IctSwing &swings[],const datetime not_after) const
+     {
+      IctSwing highs[];
+      IctSwing lows[];
+      int high_count=CollectSeparated(swings,not_after,true,highs,3);
+      int low_count=CollectSeparated(swings,not_after,false,lows,3);
       if(high_count<2 || low_count<2)
          return 0;
 
       double step=m_cfg.min_swing_step;
-      if(highs[0]>highs[1]+step && lows[0]>lows[1]+step)
+      bool highs_up=highs[0].price>highs[1].price;
+      bool lows_up=lows[0].price>lows[1].price;
+      bool highs_down=highs[0].price<highs[1].price;
+      bool lows_down=lows[0].price<lows[1].price;
+      bool displaced_up=(highs[0].price-highs[1].price>=step || lows[0].price-lows[1].price>=step);
+      bool displaced_down=(highs[1].price-highs[0].price>=step || lows[1].price-lows[0].price>=step);
+      if(highs_up && lows_up && displaced_up)
          return 1;
-      if(highs[0]<highs[1]-step && lows[0]<lows[1]-step)
+      if(highs_down && lows_down && displaced_down)
+         return -1;
+
+      if(high_count>=3 && low_count>=3 &&
+         highs[1].price>highs[2].price+step &&
+         lows[1].price>lows[2].price+step &&
+         lows[0].price>lows[1].price-step)
+         return 1;
+      if(high_count>=3 && low_count>=3 &&
+         highs[1].price<highs[2].price-step &&
+         lows[1].price<lows[2].price-step &&
+         highs[0].price<highs[1].price+step)
          return -1;
       return 0;
-     }
-
-   bool NewestSwing(const IctSwing &swings[],const bool want_high,IctSwing &swing) const
-     {
-      for(int i=0; i<ArraySize(swings); i++)
-        {
-         if(swings[i].is_high==want_high)
-           {
-            swing=swings[i];
-            return true;
-           }
-        }
-      return false;
      }
 
    bool ClosedBeyond(const MqlRates &rates[],const IctSwing &swing,const bool above) const
@@ -569,6 +590,21 @@ private:
       return (reward>=risk*m_cfg.min_reward_risk);
      }
 
+   // The nearest liquidity level still has to be far enough to justify the
+   // trade. The order itself stops at two times the risk when that level is
+   // farther, because a distant magnet is usually not reached before the stop.
+   void AimTarget(const int direction,const double entry,const double stop,IctSignalContext &ctx) const
+     {
+      ctx.target=ctx.dol;
+      double risk=MathAbs(entry-stop);
+      if(risk<=0.0)
+         return;
+      double reward=(direction==1 ? ctx.dol-entry : entry-ctx.dol);
+      double cap=risk*2.0;
+      if(reward>cap)
+         ctx.target=(direction==1 ? entry+cap : entry-cap);
+     }
+
    // The newest close still has to be beyond the level. Otherwise a break
    // that already failed, and was followed by a return through the level,
    // would still look like the current shift.
@@ -664,8 +700,8 @@ private:
       for(int side=0; side<2; side++)
         {
          bool bullish=(side==0);
-         IctSwing swing;
-         if(!NewestSwing(swings,bullish,swing))
+         IctSwing swing,ignored;
+         if(!SeparatedSwing(swings,0,bullish,swing,ignored))
             continue;
 
          int break_shift=FindBreakShift(structure,structure_copied,swing.price,bullish,swing.shift);
@@ -776,7 +812,7 @@ private:
         }
 
       ctx.model=ICT_MODEL_INVERSE;
-      ctx.target=ctx.dol;
+      AimTarget(direction,bar.close,stop,ctx);
       return (direction==1 ? ICT_SIGNAL_BUY : ICT_SIGNAL_SELL);
      }
 
@@ -856,7 +892,7 @@ private:
         }
 
       ctx.model=ICT_MODEL_CONTINUATION;
-      ctx.target=ctx.dol;
+      AimTarget(direction,bar.close,ctx.stop_price,ctx);
       return (direction==1 ? ICT_SIGNAL_BUY : ICT_SIGNAL_SELL);
      }
 
@@ -990,15 +1026,17 @@ public:
          ctx.reject_reason="no_trend";
          return ICT_SIGNAL_NONE;
         }
-      if(higher_trend!=trend)
+      // A flat 30-minute chart does not cancel a 15-minute staircase. Only the
+      // opposite staircase does.
+      if(higher_trend!=0 && higher_trend!=trend)
         {
          ctx.reject_reason="timeframes_disagree";
          return ICT_SIGNAL_NONE;
         }
 
-      IctSwing protective;
+      IctSwing protective,ignored_prior;
       bool want_high=(trend==-1);
-      if(NewestSwing(structure_swings,want_high,protective) &&
+      if(SeparatedSwing(structure_swings,0,want_high,protective,ignored_prior) &&
          ClosedBeyond(structure,protective,want_high))
         {
          ctx.reject_reason="structure_broken";
