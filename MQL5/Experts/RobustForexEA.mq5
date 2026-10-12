@@ -1,12 +1,20 @@
 #property copyright "RobustForexEA"
-#property version   "5.00"
-#property description "NY-session Nasdaq EA. Trades continuation FVGs and inverse FVGs after a DOL sweep and MSS."
+#property version   "6.13"
+#property description "NY-session Nasdaq EA. Opening-range breaks, with the ICT fair-value-gap model still available."
 
 #include <RobustForex/Strategy.mqh>
+#include <RobustForex/OpeningRange.mqh>
 #include <RobustForex/RiskManager.mqh>
 #include <RobustForex/TradeManager.mqh>
 
+enum ENUM_PLAYBOOK
+  {
+   PLAYBOOK_ICT            = 0, // ICT fair value gap
+   PLAYBOOK_OPENING_RANGE  = 1  // opening range break
+  };
+
 input group "Model"
+input ENUM_PLAYBOOK   InpPlaybook=PLAYBOOK_OPENING_RANGE;
 input bool            InpAllowContinuation=true;
 input bool            InpAllowInverse=true;
 input ENUM_TIMEFRAMES InpEntryTimeframe=PERIOD_M5;
@@ -20,28 +28,43 @@ input int             InpMssValidMinutes=90;
 input double          InpMinSwingStepPoints=20.0;
 
 input group "Setup Quality"
-input double InpMinImbalancePoints=40.0;   // middle candle of the three-candle gap
-input double InpMinBodyFraction=0.70;      // gap candle and the entry candle
-input double InpMinMssBodyFraction=0.55;   // structure-break candle
-input double InpMinBouncePoints=30.0;
-input double InpMinRoomPoints=30.0;        // from the entry to the next DOL
+input double InpMinImbalancePoints=15.0;   // middle candle of the three-candle gap
+input double InpMinBodyFraction=0.55;      // gap candle and the entry candle
+input double InpMinMssBodyFraction=0.50;   // structure-break candle
+input double InpMinBouncePoints=8.0;
+input double InpMinRoomPoints=12.0;        // from the entry to the next DOL
 input double InpMinRewardRisk=1.0;
 input double InpStopPoints=40.0;           // inverse model only; continuation uses the rejection wick
 input int    InpChopBars=8;
-input double InpMaxAlternation=0.65;
+input double InpMaxAlternation=0.80;
+
+input group "Opening Range"
+input int    InpOrbRangeMinutes=30;
+input double InpOrbMinRangePoints=12.0;
+input double InpOrbMaxRangePoints=80.0;
+input double InpOrbRewardRisk=1.5;
+input bool   InpOrbRequireDrive=true;
+input int    InpOrbStyle=2;             // 0 range break, 1 with the drive, 2 fade the drive
+input double InpOrbMinDrivePoints=5.0;
+input double InpOrbFixedStopPoints=20.0;
+input bool   InpOrbShortsOnly=true;
+input bool   InpOrbMorningOnly=true;
+input int    InpOrbMaxMorningEntries=0; // 0 keeps two shorts, or three on a large drive
+input bool   InpOrbRequireOpenFail=false; // pass account only: skip a short until the open has failed
+input int    InpOrbWeekdays=31;          // bits Mon=1 Tue=2 Wed=4 Thu=8 Fri=16, 31 is every day
 
 input group "New York Session"
 input bool InpTradeNyAm=true;
 input int  InpNyAmStartHour=9;
 input int  InpNyAmStartMinute=30;
-input int  InpNyAmEndHour=10;
+input int  InpNyAmEndHour=11;
 input int  InpNyAmEndMinute=30;
 input bool InpTradeNyPm=true;
 input int  InpNyPmStartHour=13;
 input int  InpNyPmStartMinute=0;
 input int  InpNyPmEndHour=16;
 input int  InpNyPmEndMinute=0;
-input bool InpPmOnlyIfNoAmSetup=true;
+input bool InpPmOnlyIfNoAmSetup=false;
 input bool InpBlockLunch=true;
 
 input group "News and Calendar"
@@ -60,11 +83,16 @@ input int    InpMaxBarsInTrade=0;
 
 input group "Risk Limits"
 input double InpRiskPercent=0.50;
+input double InpFixedRiskMoney=0.00;          // above 0, each trade risks this many dollars
 input double InpMinLotRiskCapPercent=0.00;
 input double InpMaxPortfolioRiskPercent=1.50;
 input int    InpMaxPortfolioPositions=1;
 input double InpMaxDailyLossPercent=2.00;
+input double InpMaxDailyLossMoney=0.00;       // above 0, block a trade whose stop would reach this daily loss
+input double InpEquityFloorMoney=0.00;        // above 0, a full stop is not allowed to reach this equity
 input double InpMaxEquityDrawdownPercent=10.00;
+input double InpMaxDrawdownMoney=0.00;        // above 0, halt after this dollar drop from the peak
+input bool   InpHaltOnDrawdown=false;         // stay stopped after the drawdown limit
 input int    InpDrawdownCooldownDays=10;
 
 input group "Costs"
@@ -77,6 +105,7 @@ input int   InpMaximumSpreadPoints=80; // broker points, not index points
 input int   InpDeviationPoints=20;
 
 CIctStrategy        g_strategy;
+COpeningRange       g_orb;
 CRiskManager        g_risk;
 CRobustTradeManager g_trades;
 datetime            g_last_bar_time=0;
@@ -84,7 +113,15 @@ datetime            g_calendar_warned=0;
 
 bool InputsAreValid(void)
   {
-   if(!InpAllowContinuation && !InpAllowInverse)
+   if(InpPlaybook==PLAYBOOK_ICT && !InpAllowContinuation && !InpAllowInverse)
+      return false;
+   if(InpPlaybook==PLAYBOOK_OPENING_RANGE &&
+      (InpOrbRangeMinutes<10 || InpOrbRangeMinutes>60 || (InpOrbRangeMinutes%5)!=0 ||
+       InpOrbMinRangePoints<=0.0 || InpOrbMaxRangePoints<=InpOrbMinRangePoints ||
+       InpOrbRewardRisk<=0.0 ||
+       InpOrbStyle<0 || InpOrbStyle>2 ||
+       InpOrbMinDrivePoints<=0.0 ||
+       InpOrbFixedStopPoints<=0.0))
       return false;
    if(!InpTradeNyAm && !InpTradeNyPm)
       return false;
@@ -127,12 +164,18 @@ bool InputsAreValid(void)
            InpPartialRewardRisk>0.0 &&
            InpMaxBarsInTrade>=0 &&
            InpRiskPercent>0.0 &&
+           InpFixedRiskMoney>=0.0 &&
            InpRiskPercent<=InpMaxPortfolioRiskPercent &&
            InpMinLotRiskCapPercent>=0.0 &&
            InpMinLotRiskCapPercent<=InpMaxPortfolioRiskPercent &&
            InpMaxPortfolioPositions>=1 &&
            InpMaxDailyLossPercent>0.0 &&
+           InpMaxDailyLossMoney>=0.0 &&
+           InpEquityFloorMoney>=0.0 &&
+           InpOrbWeekdays>=0 && InpOrbWeekdays<=31 &&
            InpMaxEquityDrawdownPercent>0.0 &&
+           InpMaxDrawdownMoney>=0.0 &&
+           InpOrbMaxMorningEntries>=0 &&
            InpDrawdownCooldownDays>=0 &&
            InpCommissionPerLotRoundTurn>=0.0 &&
            InpMinRewardCostMultiple>=0.0 &&
@@ -143,6 +186,43 @@ bool InputsAreValid(void)
 string AmSetupKey(void)
   {
    return StringFormat("ICT_AM_%I64u",InpMagicNumber);
+  }
+
+string SessionTradeKey(void)
+  {
+   return StringFormat("ICT_ST_%I64u",InpMagicNumber);
+  }
+
+int SessionTradeFlags(const MqlDateTime &eastern)
+  {
+   string key=SessionTradeKey();
+   if(!GlobalVariableCheck(key))
+      return 0;
+   double stored=GlobalVariableGet(key);
+   int day=(int)MathFloor(stored/10.0);
+   if(day!=IctDayKey(eastern))
+      return 0;
+   return (int)MathRound(stored-day*10.0);
+  }
+
+bool SessionAlreadyTraded(const MqlDateTime &eastern,const string session)
+  {
+   int flags=SessionTradeFlags(eastern);
+   if(session=="am")
+      return ((flags&1)!=0);
+   if(session=="pm")
+      return ((flags&2)!=0);
+   return false;
+  }
+
+void MarkSessionTraded(const MqlDateTime &eastern,const string session)
+  {
+   int flags=SessionTradeFlags(eastern);
+   if(session=="am")
+      flags|=1;
+   else if(session=="pm")
+      flags|=2;
+   GlobalVariableSet(SessionTradeKey(),IctDayKey(eastern)*10.0+flags);
   }
 
 bool AmSetupAlreadyFormed(const MqlDateTime &eastern)
@@ -321,6 +401,9 @@ string ModelName(const ENUM_ICT_MODEL model)
    return "none";
   }
 
+string BotLabel(void);
+void ShowBotLabel(void);
+
 int OnInit(void)
   {
    if(!InputsAreValid())
@@ -336,8 +419,13 @@ int OnInit(void)
 
    g_risk.Initialize();
    g_trades.Initialize(InpMagicNumber,InpDeviationPoints,GetPointer(g_risk));
-   if((bool)MQLInfoInteger(MQL_TESTER) && GlobalVariableCheck(AmSetupKey()))
-      GlobalVariableDel(AmSetupKey());
+   if((bool)MQLInfoInteger(MQL_TESTER))
+     {
+      if(GlobalVariableCheck(AmSetupKey()))
+         GlobalVariableDel(AmSetupKey());
+      if(GlobalVariableCheck(SessionTradeKey()))
+         GlobalVariableDel(SessionTradeKey());
+     }
 
    IctStrategySettings cfg;
    cfg.entry_timeframe=InpEntryTimeframe;
@@ -364,17 +452,189 @@ int OnInit(void)
    if(!g_strategy.Initialize(_Symbol,cfg))
       return INIT_FAILED;
 
+   OrbSettings orb;
+   orb.range_minutes=InpOrbRangeMinutes;
+   orb.min_range=InpOrbMinRangePoints;
+   orb.max_range=InpOrbMaxRangePoints;
+   orb.reward_risk=InpOrbRewardRisk;
+   orb.require_drive=InpOrbRequireDrive;
+   orb.style=InpOrbStyle;
+   orb.min_drive=InpOrbMinDrivePoints;
+   orb.fixed_stop=InpOrbFixedStopPoints;
+   orb.shorts_only=InpOrbShortsOnly;
+   orb.morning_only=InpOrbMorningOnly;
+   orb.max_morning_entries=InpOrbMaxMorningEntries;
+   orb.require_open_fail=InpOrbRequireOpenFail;
+   orb.weekdays=InpOrbWeekdays;
+   g_orb.Configure(orb);
+
    g_last_bar_time=iTime(_Symbol,InpEntryTimeframe,0);
-   PrintFormat("EA|event=initialized|symbol=%s|entry=%s|structure=%s|bias=%s|magic=%I64u",
-               _Symbol,EnumToString(InpEntryTimeframe),EnumToString(InpStructureTimeframe),
+   ShowBotLabel();
+   PrintFormat("EA|event=initialized|bot=%s|symbol=%s|entry=%s|structure=%s|bias=%s|magic=%I64u",
+               BotLabel(),_Symbol,EnumToString(InpEntryTimeframe),EnumToString(InpStructureTimeframe),
                EnumToString(InpBiasTimeframe),InpMagicNumber);
    return INIT_SUCCEEDED;
   }
 
+string BotLabel(void)
+  {
+   if(InpOrbRequireOpenFail && InpFixedRiskMoney>0.0 && InpOrbMaxMorningEntries==1)
+      return "PASS BOT";
+   if(!InpOrbRequireOpenFail && InpFixedRiskMoney<=0.0 && InpOrbMaxMorningEntries==0)
+      return "PROFIT BOT";
+   return "CUSTOM BOT";
+  }
+
+void ShowBotLabel(void)
+  {
+   string risk=(InpFixedRiskMoney>0.0
+                ? StringFormat("$%.0f a trade",InpFixedRiskMoney)
+                : StringFormat("%.0f%% of the balance",InpRiskPercent));
+   string shorts=(InpOrbMaxMorningEntries==1 ? "1 short" :
+                  (InpOrbMaxMorningEntries==0 ? "up to 3 shorts"
+                                              : StringFormat("%d shorts",InpOrbMaxMorningEntries)));
+   string wait=(InpOrbRequireOpenFail ? "waits for the open" : "does not wait for the open");
+   string days="every day";
+   if(InpOrbWeekdays>0 && InpOrbWeekdays<31)
+     {
+      string names[5]={"Mon","Tue","Wed","Thu","Fri"};
+      days="";
+      for(int i=0;i<5;i++)
+        {
+         if((InpOrbWeekdays&(1<<i))==0)
+            continue;
+         if(days!="")
+            days+=" ";
+         days+=names[i];
+        }
+     }
+   Comment(BotLabel()+"\n"+risk+"\n"+shorts+", "+wait+"\n"+days);
+  }
+
+// Returns false when a full stop would reach the equity floor. The
+// dollar risk is cut so the stop lands on the floor, not through it.
+bool EntryRiskPercent(double &percent)
+  {
+   if(InpFixedRiskMoney<=0.0)
+     {
+      percent=InpRiskPercent;
+      return true;
+     }
+   double equity=AccountInfoDouble(ACCOUNT_EQUITY);
+   if(equity<=0.0)
+     {
+      percent=InpRiskPercent;
+      return true;
+     }
+   double money=InpFixedRiskMoney;
+   if(InpEquityFloorMoney>0.0)
+     {
+      double room=equity-InpEquityFloorMoney;
+      if(room<250.0)
+         return false;
+      if(room<money)
+         money=room;
+     }
+   percent=money/equity*100.0;
+   return true;
+  }
+
 void OnDeinit(const int reason)
   {
+   Comment("");
    g_strategy.Release();
    PrintFormat("EA|event=deinitialized|reason=%d",reason);
+  }
+
+bool FlatOpeningRange(void)
+  {
+   if(InpPlaybook!=PLAYBOOK_OPENING_RANGE || !g_trades.HasManagedPosition(_Symbol))
+      return false;
+
+   datetime forming=iTime(_Symbol,PERIOD_M5,0);
+   if(forming<=0)
+      return false;
+   MqlDateTime eastern;
+   IctGmtToEastern(IctServerToGmt(forming),eastern);
+   int minutes=eastern.hour*60+eastern.min;
+
+   ulong ticket=0;
+   ENUM_POSITION_TYPE type=POSITION_TYPE_BUY;
+   datetime open_time=0;
+   if(!g_trades.ManagedPosition(_Symbol,ticket,type,open_time))
+      return false;
+   if(!PositionSelectByTicket(ticket))
+      return false;
+
+   string comment=PositionGetString(POSITION_COMMENT);
+   if(StringFind(comment,"ORB am")>=0 && minutes>=11*60+30)
+     {
+      g_trades.CloseManaged(_Symbol,"am_flat");
+      return true;
+     }
+   if(minutes>=15*60+55)
+     {
+      g_trades.CloseManaged(_Symbol,"session_flat");
+      return true;
+     }
+   return false;
+  }
+
+bool SubmitSignal(const ENUM_ICT_SIGNAL signal,const double stop_price,const double stop_distance,
+                  const double target_price,const string session,const string comment)
+  {
+   double spread_points=0.0;
+   if(!SpreadIsAcceptable(spread_points))
+     {
+      PrintFormat("FILTER|event=entry_blocked|symbol=%s|reason=spread|points=%.1f",
+                  _Symbol,spread_points);
+      return false;
+     }
+
+   double entry=0.0;
+   double stop=0.0;
+   double target=0.0;
+   if(!g_trades.BuildIctLevels(_Symbol,signal,stop_price,stop_distance,target_price,
+                               InpMinRewardRisk,entry,stop,target))
+      return false;
+
+   if(!MoveIsWorthTheCost(MathAbs(target-entry),spread_points))
+     {
+      PrintFormat("FILTER|event=entry_blocked|symbol=%s|reason=cost_too_high|reward=%.8f|spread_points=%.1f",
+                  _Symbol,MathAbs(target-entry),spread_points);
+      return false;
+     }
+
+   double risk_percent=0.0;
+   if(!EntryRiskPercent(risk_percent))
+     {
+      PrintFormat("RISK|event=entry_blocked|symbol=%s|reason=equity_floor|equity=%.2f|floor=%.2f",
+                  _Symbol,AccountInfoDouble(ACCOUNT_EQUITY),InpEquityFloorMoney);
+      return false;
+     }
+
+   ENUM_ORDER_TYPE order_type=(signal==ICT_SIGNAL_BUY ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
+   double volume=g_risk.CalculateVolume(_Symbol,order_type,entry,stop,risk_percent,
+                                        InpMinLotRiskCapPercent);
+   double planned_risk=g_risk.RiskPercentForVolume(_Symbol,order_type,entry,stop,volume);
+   if(planned_risk<=0.0)
+      planned_risk=risk_percent;
+
+   string risk_reason="";
+   if(!g_risk.CanOpen(InpMagicNumber,InpMaxPortfolioPositions,planned_risk,
+                      InpMaxPortfolioRiskPercent,InpMaxDailyLossPercent,
+                      InpMaxEquityDrawdownPercent,InpDrawdownCooldownDays,risk_reason,
+                      InpMaxDailyLossMoney,InpMaxDrawdownMoney,InpHaltOnDrawdown))
+     {
+      PrintFormat("RISK|event=entry_blocked|symbol=%s|reason=%s|planned_risk=%.2f",
+                  _Symbol,risk_reason,planned_risk);
+      return false;
+     }
+
+   PrintFormat("SIGNAL|symbol=%s|session=%s|side=%s|stop=%.2f|target=%.2f|volume=%.4f|risk=%.2f",
+               _Symbol,session,(signal==ICT_SIGNAL_BUY ? "buy" : "sell"),
+               stop,target,volume,planned_risk);
+   return g_trades.Open(_Symbol,signal,volume,stop,target,comment);
   }
 
 void OnTick(void)
@@ -386,6 +646,9 @@ void OnTick(void)
                       InpPartialRewardRisk,InpMoveStopToBreakeven);
 
    if(!IsNewSignalBar())
+      return;
+
+   if(FlatOpeningRange())
       return;
 
    if(InpMaxBarsInTrade>0 && g_trades.HasManagedPosition(_Symbol))
@@ -415,6 +678,31 @@ void OnTick(void)
    if(!ClosedBarEastern(eastern))
       return;
 
+   if(InpPlaybook==PLAYBOOK_OPENING_RANGE)
+     {
+      if(InpBlockOpexDay && IctIsOpexDay(eastern))
+         return;
+      string news_reason="";
+      if(CalendarBlocks(TimeGMT(),eastern,news_reason))
+         return;
+
+      MqlRates closed[];
+      ArraySetAsSeries(closed,true);
+      if(CopyRates(_Symbol,PERIOD_M5,1,1,closed)!=1)
+         return;
+
+      OrbSignal orb;
+      if(g_orb.Evaluate(closed[0],eastern,orb)!=ICT_SIGNAL_NONE)
+        {
+         string comment=(orb.session=="am" ? "ORB am" : "ORB pm");
+         SubmitSignal(orb.signal,orb.stop_price,orb.stop_distance,orb.target,orb.session,comment);
+        }
+      else if(orb.reason!="")
+         PrintFormat("FILTER|event=no_entry|symbol=%s|session=%s|reason=%s",
+                     _Symbol,orb.session,orb.reason);
+      return;
+     }
+
    string session="";
    if(!InTradeWindow(eastern,session))
       return;
@@ -435,6 +723,13 @@ void OnTick(void)
    if(session=="pm" && InpPmOnlyIfNoAmSetup && AmSetupAlreadyFormed(eastern))
      {
       PrintFormat("FILTER|event=entry_blocked|symbol=%s|reason=am_setup_already_formed",_Symbol);
+      return;
+     }
+
+   if(SessionAlreadyTraded(eastern,session))
+     {
+      PrintFormat("FILTER|event=entry_blocked|symbol=%s|reason=session_already_traded|session=%s",
+                  _Symbol,session);
       return;
      }
 
@@ -472,17 +767,26 @@ void OnTick(void)
       return;
      }
 
+   double risk_percent=0.0;
+   if(!EntryRiskPercent(risk_percent))
+     {
+      PrintFormat("RISK|event=entry_blocked|symbol=%s|reason=equity_floor|equity=%.2f|floor=%.2f",
+                  _Symbol,AccountInfoDouble(ACCOUNT_EQUITY),InpEquityFloorMoney);
+      return;
+     }
+
    ENUM_ORDER_TYPE order_type=(signal==ICT_SIGNAL_BUY ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
-   double volume=g_risk.CalculateVolume(_Symbol,order_type,entry,stop,InpRiskPercent,
+   double volume=g_risk.CalculateVolume(_Symbol,order_type,entry,stop,risk_percent,
                                         InpMinLotRiskCapPercent);
    double planned_risk=g_risk.RiskPercentForVolume(_Symbol,order_type,entry,stop,volume);
    if(planned_risk<=0.0)
-      planned_risk=InpRiskPercent;
+      planned_risk=risk_percent;
 
    string risk_reason="";
    if(!g_risk.CanOpen(InpMagicNumber,InpMaxPortfolioPositions,planned_risk,
                       InpMaxPortfolioRiskPercent,InpMaxDailyLossPercent,
-                      InpMaxEquityDrawdownPercent,InpDrawdownCooldownDays,risk_reason))
+                      InpMaxEquityDrawdownPercent,InpDrawdownCooldownDays,risk_reason,
+                      InpMaxDailyLossMoney,InpMaxDrawdownMoney,InpHaltOnDrawdown))
      {
       PrintFormat("RISK|event=entry_blocked|symbol=%s|reason=%s|planned_risk=%.2f",
                   _Symbol,risk_reason,planned_risk);
@@ -493,7 +797,8 @@ void OnTick(void)
                _Symbol,session,ModelName(ctx.model),
                (signal==ICT_SIGNAL_BUY ? "buy" : "sell"),
                ctx.fvg_low,ctx.fvg_high,ctx.dol,stop,target,volume,planned_risk);
-   g_trades.Open(_Symbol,signal,volume,stop,target,"ICT "+ModelName(ctx.model));
+   if(g_trades.Open(_Symbol,signal,volume,stop,target,"ICT "+ModelName(ctx.model)))
+      MarkSessionTraded(eastern,session);
   }
 
 double LotsTraded(void)

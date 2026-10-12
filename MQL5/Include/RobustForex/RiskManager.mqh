@@ -256,7 +256,10 @@ public:
                 const double max_daily_loss_percent,
                 const double max_drawdown_percent,
                 const int drawdown_cooldown_days,
-                string &reason)
+                string &reason,
+                const double max_daily_loss_money=0.0,
+                const double max_drawdown_money=0.0,
+                const bool halt_on_drawdown=false)
      {
       RefreshAnchors();
       double equity=AccountInfoDouble(ACCOUNT_EQUITY);
@@ -268,6 +271,20 @@ public:
          reason="daily_loss_lock";
          return false;
         }
+      // FTMO's daily loss is a fixed dollar line. Block the trade when
+      // today's loss plus this trade's full stop would reach it.
+      if(max_daily_loss_money>0.0 && daily_start>0.0)
+        {
+         double day_loss=daily_start-equity;
+         if(day_loss<0.0)
+            day_loss=0.0;
+         double new_risk_money=equity*new_risk_percent/100.0;
+         if(day_loss+new_risk_money>=max_daily_loss_money)
+           {
+            reason="daily_loss_money_lock";
+            return false;
+           }
+        }
 
       // A permanent drawdown lock would freeze the account forever, so the
       // lock instead pauses trading and then re-anchors after a cooldown.
@@ -276,20 +293,27 @@ public:
       // cooldown clock forever, and an earlier attempt at recovery-based
       // hysteresis let a stale lock fall through and skip the pause entirely.
       double drawdown_percent=(peak>0.0 ? (peak-equity)/peak*100.0 : 0.0);
+      double drawdown_money=(peak>0.0 ? peak-equity : 0.0);
       string lock_key=LockKey();
       bool locked=GlobalVariableCheck(lock_key);
+      bool money_breach=(max_drawdown_money>0.0 && drawdown_money>=max_drawdown_money);
 
-      if(!locked && drawdown_percent>=max_drawdown_percent)
+      if(!locked && (drawdown_percent>=max_drawdown_percent || money_breach))
         {
          GlobalVariableSet(lock_key,(double)TimeCurrent());
-         PrintFormat("RISK|event=drawdown_lock_engaged|equity=%.2f|peak=%.2f|drawdown=%.2f",
-                     equity,peak,drawdown_percent);
+         PrintFormat("RISK|event=drawdown_lock_engaged|equity=%.2f|peak=%.2f|drawdown=%.2f|drawdown_money=%.2f",
+                     equity,peak,drawdown_percent,drawdown_money);
          reason="equity_drawdown_lock";
          return false;
         }
 
       if(locked)
         {
+         if(halt_on_drawdown)
+           {
+            reason="equity_drawdown_halt";
+            return false;
+           }
          datetime locked_at=(datetime)GlobalVariableGet(lock_key);
          long cooldown_seconds=(long)drawdown_cooldown_days*86400;
          if(TimeCurrent()-locked_at<cooldown_seconds)
