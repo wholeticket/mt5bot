@@ -56,7 +56,7 @@ PAGE = """<!DOCTYPE html>
   <section>
     <h2>Chart the bot is reading</h2>
     <svg id="chart" viewBox="0 0 800 340"></svg>
-    <div class="muted">M5 candles. The gold line is the 09:30 New York open. The dashed lines are 60 points either side, the size the 10:00 and 11:00 shots need.</div>
+    <div class="muted" id="caption">M5 candles. The gold line is the 09:30 New York open. The dashed lines are 60 points either side, the size the 10:00 and 11:00 shots need.</div>
   </section>
   <section>
     <h2>Weighing</h2>
@@ -75,7 +75,14 @@ function cls(kind) {
 function row(label, text, kind) {
   return '<div class="row"><span>' + label + '</span><b class="' + cls(kind) + '">' + text + '</b></div>';
 }
-function draw(bars, openPx) {
+function hline(d, y, p, color, label, dash, below) {
+  const pad = 16, w = 800;
+  const yy = y(p);
+  d.parts += '<line x1="'+pad+'" x2="'+(w-pad)+'" y1="'+yy+'" y2="'+yy+'" stroke="'+color+'" stroke-width="1.4"'+(dash ? ' stroke-dasharray="5 4"' : '')+'/>';
+  const ty = below ? Math.min(330, yy + 14) : Math.max(14, yy - 5);
+  d.parts += '<text x="'+(w-pad-4)+'" y="'+ty+'" fill="'+color+'" font-size="13" text-anchor="end">'+label+'</text>';
+}
+function draw(bars, openPx, trade) {
   const svg = document.getElementById("chart");
   if (!bars.length) { svg.innerHTML = ""; return; }
   const pad = 16;
@@ -83,26 +90,36 @@ function draw(bars, openPx) {
   let lo = Math.min(...bars.map(b => b.l));
   let hi = Math.max(...bars.map(b => b.h));
   if (openPx) { lo = Math.min(lo, openPx - 60); hi = Math.max(hi, openPx + 60); }
-  const span = Math.max(hi - lo, 1);
+  if (trade) {
+    [trade.entry, trade.stop, trade.target].forEach(p => {
+      if (p) { lo = Math.min(lo, p); hi = Math.max(hi, p); }
+    });
+  }
+  const span0 = Math.max(hi - lo, 1);
+  lo -= span0 * 0.04;
+  hi += span0 * 0.06;
+  const span = hi - lo;
   const y = p => pad + (hi - p) / span * (h - pad * 2);
   const cw = (w - pad * 2) / bars.length;
-  let d = "";
+  const d = {parts: ""};
   bars.forEach((b, i) => {
     const x = pad + i * cw + cw * 0.5;
     const up = b.c >= b.o;
     const color = up ? "#8fce7a" : "#e07a72";
-    d += '<line x1="'+x+'" x2="'+x+'" y1="'+y(b.h)+'" y2="'+y(b.l)+'" stroke="'+color+'" stroke-width="1"/>';
+    d.parts += '<line x1="'+x+'" x2="'+x+'" y1="'+y(b.h)+'" y2="'+y(b.l)+'" stroke="'+color+'" stroke-width="1"/>';
     const top = y(Math.max(b.o, b.c));
     const bot = y(Math.min(b.o, b.c));
-    d += '<rect x="'+(x-cw*0.28)+'" y="'+top+'" width="'+(cw*0.56)+'" height="'+Math.max(1, bot-top)+'" fill="'+color+'"/>';
+    d.parts += '<rect x="'+(x-cw*0.28)+'" y="'+top+'" width="'+(cw*0.56)+'" height="'+Math.max(1, bot-top)+'" fill="'+color+'"/>';
   });
   if (openPx) {
-    [openPx, openPx+60, openPx-60].forEach((p, n) => {
-      const dash = n ? ' stroke-dasharray="4 4"' : "";
-      d += '<line x1="'+pad+'" x2="'+(w-pad)+'" y1="'+y(p)+'" y2="'+y(p)+'" stroke="#c8b56a" stroke-width="1"'+dash+'/>';
-    });
+    hline(d, y, openPx, "#c8b56a", "09:30 open " + openPx.toFixed(2), false, false);
+    hline(d, y, openPx + 60, "#c8b56a", "", true, false);
+    hline(d, y, openPx - 60, "#c8b56a", "", true, true);
   }
-  svg.innerHTML = d;
+  if (trade && trade.stop) hline(d, y, trade.stop, "#e07a72", "stop " + trade.stop.toFixed(2), false, true);
+  if (trade && trade.entry) hline(d, y, trade.entry, "#e7e1d4", "entry " + trade.entry.toFixed(2), false, false);
+  if (trade && trade.target) hline(d, y, trade.target, "#8fce7a", "target " + trade.target.toFixed(2), false, false);
+  svg.innerHTML = d.parts;
 }
 async function tick() {
   const data = await (await fetch("/api")).json();
@@ -113,7 +130,13 @@ async function tick() {
   v.className = cls(data.verdict_kind);
   document.getElementById("rows").innerHTML = data.rows.map(r => row(r.label, r.text, r.kind)).join("");
   document.getElementById("ea").textContent = data.ea;
-  draw(data.bars, data.open930);
+  const cap = document.getElementById("caption");
+  if (data.trade) {
+    cap.textContent = "White line is the entry. Red is the stop. Green is the target. The gold line is still the 09:30 open.";
+  } else {
+    cap.textContent = "M5 candles. The gold line is the 09:30 New York open. The dashed lines are 60 points either side, the size the 10:00 and 11:00 shots need.";
+  }
+  draw(data.bars, data.open930, data.trade);
 }
 tick();
 setInterval(tick, 2000);
@@ -178,6 +201,48 @@ def ride_view(bars, minutes):
     return ("buy" if buy else "sell"), f"{word} the move, take about {bite:.0f} points"
 
 
+def trade_name(comment):
+    names = {
+        "ORB day": "11:00 with the move",
+        "ORB daily": "11:00 fallback",
+        "ORB am": "morning shot",
+        "ORB pm": "afternoon buy",
+        "ORB ride": "ride",
+    }
+    return names.get(comment or "", comment or "open trade")
+
+
+def trade_view(position):
+    buy = position.type == mt5.POSITION_TYPE_BUY
+    entry = float(position.price_open)
+    stop = float(position.sl) or None
+    target = float(position.tp) or None
+    price = float(position.price_current)
+    if buy:
+        in_points = price - entry
+        to_stop = None if not stop else price - stop
+        to_target = None if not target else target - price
+    else:
+        in_points = entry - price
+        to_stop = None if not stop else stop - price
+        to_target = None if not target else price - target
+    comment = position.comment or ""
+    return {
+        "side": "buy" if buy else "sell",
+        "name": trade_name(comment),
+        "entry": entry,
+        "stop": stop,
+        "target": target,
+        "volume": float(position.volume),
+        "profit": float(position.profit),
+        "price": price,
+        "in_points": in_points,
+        "to_stop": to_stop,
+        "to_target": to_target,
+        "flat": "11:30 New York" if comment == "ORB am" else "15:55 New York",
+    }
+
+
 def side_for(move, fade):
     if abs(move) < SHOT_POINTS:
         return "pass", f"{abs(move):.1f} points, needs {SHOT_POINTS:.0f}"
@@ -192,13 +257,13 @@ def side_for(move, fade):
 def snapshot():
     if mt5.terminal_info() is None and not mt5.initialize():
         return {"clock": "MetaTrader is not connected.", "account": "", "verdict": "Cannot see the chart",
-                "verdict_kind": "wait", "rows": [], "ea": "", "bars": [], "open930": None}
+                "verdict_kind": "wait", "rows": [], "ea": "", "bars": [], "open930": None, "trade": None}
     tick = mt5.symbol_info_tick(SYMBOL)
     info = mt5.account_info()
     rates = mt5.copy_rates_from_pos(SYMBOL, mt5.TIMEFRAME_M5, 0, 80)
     if tick is None or rates is None:
         return {"clock": "No US100.cash prices yet.", "account": "", "verdict": "Waiting for prices",
-                "verdict_kind": "wait", "rows": [], "ea": read_log_tail(), "bars": [], "open930": None}
+                "verdict_kind": "wait", "rows": [], "ea": read_log_tail(), "bars": [], "open930": None, "trade": None}
 
     offset = server_offset_hours(tick.time)
     now = ny_now(offset)
@@ -219,12 +284,16 @@ def snapshot():
     positions = mt5.positions_get(symbol=SYMBOL) or []
     managed = [p for p in positions if p.magic == MAGIC]
 
+    trade = None
     if managed:
         position = managed[0]
-        kind = "buy" if position.type == mt5.POSITION_TYPE_BUY else "sell"
-        verdict = "In a trade"
+        trade = trade_view(position)
+        kind = trade["side"]
+        pos_text = f"{'Buy' if kind == 'buy' else 'Sell'} {trade['volume']:.2f} at {trade['entry']:.2f}"
+        stop_bit = f"{trade['stop']:.2f}" if trade["stop"] else "no stop"
+        target_bit = f"{trade['target']:.2f}" if trade["target"] else "no target"
+        verdict = f"In the {trade['name']} {kind}. Looking for {target_bit}. Stop is {stop_bit}."
         verdict_kind = kind
-        pos_text = f"{'Buy' if kind == 'buy' else 'Sell'} {position.volume:.2f} at {position.price_open:.2f}"
     else:
         pos_text = "No open trade"
         if open930 is None:
@@ -250,43 +319,55 @@ def snapshot():
             verdict = "Shots have had their bar. A ride can hop on a move already going."
             verdict_kind = "wait"
 
-    ten_kind, ten_text = ("wait", "Waiting for the 09:30 open") if move is None else side_for(move, True)
-    eleven_kind, eleven_text = ("wait", "Waiting for the 09:30 open") if move is None else side_for(move, False)
-    if move is None:
-        fall_kind, fall_text = "wait", "Waiting for the 09:30 open"
-    elif abs(move) >= SHOT_POINTS:
-        fall_kind, fall_text = "pass", "Not used if the 60-point shot is taken"
-    elif abs(move) >= 0.5:
-        fall_kind = "buy" if move > 0 else "sell"
-        fall_text = f"{'Buy' if fall_kind == 'buy' else 'Sell'} the smaller 11:00 trade, stop 30, target 120"
+    if trade:
+        money = f"${trade['profit']:+,.0f}"
+        rows = [
+            {"label": "Trade", "text": trade["name"], "kind": trade["side"]},
+            {"label": "Entry", "text": f"{trade['entry']:.2f}", "kind": trade["side"]},
+            {"label": "Price now", "text": f"{trade['price']:.2f}, {trade['in_points']:+.1f} points, {money}", "kind": "buy" if trade["in_points"] >= 0 else "sell"},
+            {"label": "Stop", "text": "not set" if not trade["stop"] else f"{trade['stop']:.2f}, {trade['to_stop']:.1f} points under the price" if trade["side"] == "buy" else f"{trade['stop']:.2f}, {trade['to_stop']:.1f} points above the price", "kind": "sell"},
+            {"label": "Target", "text": "not set" if not trade["target"] else f"{trade['target']:.2f}, {trade['to_target']:.1f} points to go", "kind": "buy"},
+            {"label": "If neither hits", "text": f"Close at {trade['flat']}", "kind": "wait"},
+            {"label": "Position", "text": pos_text, "kind": trade["side"]},
+        ]
     else:
-        fall_kind, fall_text = "pass", "Morning is flat"
+        ten_kind, ten_text = ("wait", "Waiting for the 09:30 open") if move is None else side_for(move, True)
+        eleven_kind, eleven_text = ("wait", "Waiting for the 09:30 open") if move is None else side_for(move, False)
+        if move is None:
+            fall_kind, fall_text = "wait", "Waiting for the 09:30 open"
+        elif abs(move) >= SHOT_POINTS:
+            fall_kind, fall_text = "pass", "Not used if the 60-point shot is taken"
+        elif abs(move) >= 0.5:
+            fall_kind = "buy" if move > 0 else "sell"
+            fall_text = f"{'Buy' if fall_kind == 'buy' else 'Sell'} the smaller 11:00 trade, stop 30, target 120"
+        else:
+            fall_kind, fall_text = "pass", "Morning is flat"
 
-    if minutes <= 11 * 60:
-        structure = "Held back until the 11:00 shot bar is done"
-    else:
-        structure = "Allowed to look. It still needs a clean fair-value gap."
+        if minutes <= 11 * 60:
+            structure = "Held back until the 11:00 shot bar is done"
+        else:
+            structure = "Allowed to look. It still needs a clean fair-value gap."
 
-    ride_kind, ride_text = ride_view(bars, minutes)
-    if not managed and minutes > 11 * 60 and ride_kind in ("buy", "sell"):
-        verdict = ride_text
-        verdict_kind = ride_kind
+        ride_kind, ride_text = ride_view(bars, minutes)
+        if minutes > 11 * 60 and ride_kind in ("buy", "sell"):
+            verdict = ride_text
+            verdict_kind = ride_kind
 
-    if not spread_ok:
-        verdict = "Spread is too wide to send an order"
-        verdict_kind = "pass"
+        if not spread_ok:
+            verdict = "Spread is too wide to send an order"
+            verdict_kind = "pass"
 
-    rows = [
-        {"label": "New York", "text": now.strftime("%H:%M"), "kind": "wait"},
-        {"label": "Spread", "text": f"{spread:.0f} points, max {SPREAD_MAX}", "kind": "wait" if spread_ok else "pass"},
-        {"label": "Move from 09:30", "text": "not printed yet" if move is None else f"{move:+.1f} points", "kind": "wait"},
-        {"label": "10:00 fade", "text": ten_text, "kind": ten_kind},
-        {"label": "11:00 with the move", "text": eleven_text, "kind": eleven_kind},
-        {"label": "11:00 fallback", "text": fall_text, "kind": fall_kind},
-        {"label": "Structure long or short", "text": structure, "kind": "wait"},
-        {"label": "Ride", "text": ride_text, "kind": ride_kind},
-        {"label": "Position", "text": pos_text, "kind": "buy" if managed and managed[0].type == mt5.POSITION_TYPE_BUY else ("sell" if managed else "pass")},
-    ]
+        rows = [
+            {"label": "New York", "text": now.strftime("%H:%M"), "kind": "wait"},
+            {"label": "Spread", "text": f"{spread:.0f} points, max {SPREAD_MAX}", "kind": "wait" if spread_ok else "pass"},
+            {"label": "Move from 09:30", "text": "not printed yet" if move is None else f"{move:+.1f} points", "kind": "wait"},
+            {"label": "10:00 fade", "text": ten_text, "kind": ten_kind},
+            {"label": "11:00 with the move", "text": eleven_text, "kind": eleven_kind},
+            {"label": "11:00 fallback", "text": fall_text, "kind": fall_kind},
+            {"label": "Structure long or short", "text": structure, "kind": "wait"},
+            {"label": "Ride", "text": ride_text, "kind": ride_kind},
+            {"label": "Position", "text": pos_text, "kind": "pass"},
+        ]
     account = ""
     if info is not None:
         account = f"Demo {info.login}  Balance ${info.balance:,.0f}"
@@ -299,6 +380,7 @@ def snapshot():
         "ea": read_log_tail(),
         "bars": bars[-60:],
         "open930": open930,
+        "trade": trade,
     }
 
 
