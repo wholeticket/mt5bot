@@ -1,9 +1,12 @@
 """Live view of the pass bot weighing US100.cash. Read only. Sends no orders.
 
 Open http://127.0.0.1:8765/ while MetaTrader is logged into the FTMO demo.
+The same page is also on http://127.0.0.1:18765/ because that is the port
+the browser tab was opened on.
 """
 
 import json
+import threading
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -15,7 +18,7 @@ MAGIC = 26101201
 SPREAD_MAX = 250
 SHOT_POINTS = 60.0
 HOST = "127.0.0.1"
-PORT = 8765
+PORTS = (8765, 18765)
 LOG = Path(r"C:\Users\user\AppData\Roaming\MetaQuotes\Terminal\D0E8209F77C8CF37AD8BF550E51FF075\MQL5\logs")
 
 PAGE = """<!DOCTYPE html>
@@ -293,9 +296,12 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     mt5.initialize()
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(f"http://{HOST}:{PORT}/", flush=True)
-    server.serve_forever()
+    servers = [ThreadingHTTPServer((HOST, port), Handler) for port in PORTS]
+    for server in servers:
+        print(f"http://{server.server_address[0]}:{server.server_address[1]}/", flush=True)
+    for server in servers[1:]:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    servers[0].serve_forever()
 
 
 if __name__ == "__main__":
