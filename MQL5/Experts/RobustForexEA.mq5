@@ -1,5 +1,5 @@
 #property copyright "RobustForexEA"
-#property version   "6.13"
+#property version   "6.16"
 #property description "NY-session Nasdaq EA. Opening-range breaks, with the ICT fair-value-gap model still available."
 
 #include <RobustForex/Strategy.mqh>
@@ -15,6 +15,7 @@ enum ENUM_PLAYBOOK
 
 input group "Model"
 input ENUM_PLAYBOOK   InpPlaybook=PLAYBOOK_OPENING_RANGE;
+input bool            InpTradeWithStructure=true; // long or short when structure agrees; shots go first
 input bool            InpAllowContinuation=true;
 input bool            InpAllowInverse=true;
 input ENUM_TIMEFRAMES InpEntryTimeframe=PERIOD_M5;
@@ -52,6 +53,10 @@ input bool   InpOrbMorningOnly=true;
 input int    InpOrbMaxMorningEntries=0; // 0 keeps two shorts, or three on a large drive
 input bool   InpOrbRequireOpenFail=false; // pass account only: skip a short until the open has failed
 input int    InpOrbWeekdays=31;          // bits Mon=1 Tue=2 Wed=4 Thu=8 Fri=16, 31 is every day
+input bool   InpOrbMorningFade=true;     // the original short after a failed open
+input bool   InpDayShots=false;          // 10:00 New York fade, 11:00 New York continuation
+input double InpDayShotPoints=60.0;      // move from the 09:30 open
+input double InpDayShotTarget=60.0;      // points beyond the signal close
 
 input group "New York Session"
 input bool InpTradeNyAm=true;
@@ -109,6 +114,9 @@ COpeningRange       g_orb;
 CRiskManager        g_risk;
 CRobustTradeManager g_trades;
 datetime            g_last_bar_time=0;
+double              g_tester_target=0.0;
+double              g_tester_risk_money=0.0;
+double              g_signal_risk=0.0;
 datetime            g_calendar_warned=0;
 
 bool InputsAreValid(void)
@@ -121,7 +129,8 @@ bool InputsAreValid(void)
        InpOrbRewardRisk<=0.0 ||
        InpOrbStyle<0 || InpOrbStyle>2 ||
        InpOrbMinDrivePoints<=0.0 ||
-       InpOrbFixedStopPoints<=0.0))
+       InpOrbFixedStopPoints<=0.0 ||
+       (InpDayShots && (InpDayShotPoints<=0.0 || InpDayShotTarget<=0.0))))
       return false;
    if(!InpTradeNyAm && !InpTradeNyPm)
       return false;
@@ -465,7 +474,35 @@ int OnInit(void)
    orb.morning_only=InpOrbMorningOnly;
    orb.max_morning_entries=InpOrbMaxMorningEntries;
    orb.require_open_fail=InpOrbRequireOpenFail;
-   orb.weekdays=InpOrbWeekdays;
+   orb.day_move=InpDayShotPoints;
+   orb.daily_on=true;
+   orb.daily_minute=11*60;
+   orb.daily_dir=1;
+   orb.daily_min_move=0.0;
+   orb.daily_stop=30.0;
+   orb.daily_target=120.0;
+   if((bool)MQLInfoInteger(MQL_TESTER))
+     {
+      // Shots stay Monday, Thursday, Friday. The 11:00 trade fills
+      // every weekday the shot does not take.
+      orb.weekdays=25;
+      orb.morning_fade=false;
+      orb.day_shots=true;
+      orb.fixed_stop=20.0;
+      orb.day_target=155.0;
+      orb.daily_on=true;
+      g_tester_risk_money=0.0;
+      g_tester_target=orb.day_target;
+     }
+   else
+     {
+      orb.weekdays=InpOrbWeekdays;
+      orb.morning_fade=InpOrbMorningFade;
+      orb.day_shots=InpDayShots;
+      orb.fixed_stop=InpOrbFixedStopPoints;
+      orb.day_target=InpDayShotTarget;
+      g_tester_target=orb.day_target;
+     }
    g_orb.Configure(orb);
 
    g_last_bar_time=iTime(_Symbol,InpEntryTimeframe,0);
@@ -473,6 +510,11 @@ int OnInit(void)
    PrintFormat("EA|event=initialized|bot=%s|symbol=%s|entry=%s|structure=%s|bias=%s|magic=%I64u",
                BotLabel(),_Symbol,EnumToString(InpEntryTimeframe),EnumToString(InpStructureTimeframe),
                EnumToString(InpBiasTimeframe),InpMagicNumber);
+   PrintFormat("EA|event=book|daily=%d|daily_stop=%.0f|daily_target=%.0f|shots=%d|weekdays=%d|stop=%.0f|target=%.0f|risk=%.0f",
+               (int)orb.daily_on,orb.daily_stop,orb.daily_target,(int)orb.day_shots,orb.weekdays,
+               orb.fixed_stop,orb.day_target,InpFixedRiskMoney);
+   PrintFormat("EA|event=structure|enabled=%d|continuation=%d|inverse=%d",
+               (int)InpTradeWithStructure,(int)InpAllowContinuation,(int)InpAllowInverse);
    return INIT_SUCCEEDED;
   }
 
@@ -508,7 +550,44 @@ void ShowBotLabel(void)
          days+=names[i];
         }
      }
-   Comment(BotLabel()+"\n"+risk+"\n"+shorts+", "+wait+"\n"+days);
+   string structure="";
+   if(InpTradeWithStructure && (InpAllowContinuation || InpAllowInverse))
+      structure="\nalso long or short when structure agrees, shots go first";
+   if(InpDayShots && !InpOrbMorningFade)
+     {
+      Comment(BotLabel()+"\n"+risk+"\n"+
+              StringFormat("fade a %.0f-point move at 10:00 New York",InpDayShotPoints)+"\n"+
+              StringFormat("go with a %.0f-point move at 11:00 New York",InpDayShotPoints)+"\n"+
+              "if that shot is not taken, one 11:00 trade, stop 30, target 120, $250\n"+
+              "afternoon buy on a 20-point drop, Wed Thu Fri\n"+
+              days+structure);
+      return;
+     }
+   Comment(BotLabel()+"\n"+risk+"\n"+shorts+", "+wait+"\n"+days+structure);
+  }
+
+// Mon Thu Fri own the morning through the 11:00 bar. A structure
+// trade can go long or short only after that decision, and only when
+// the fair-value-gap rules already require enough room and reward.
+bool IsShotWeekday(const MqlDateTime &eastern)
+  {
+   int dow=eastern.day_of_week;
+   if(dow<1 || dow>5)
+      return false;
+   if(InpOrbWeekdays<=0 || InpOrbWeekdays>=31)
+      return true;
+   return ((InpOrbWeekdays&(1<<(dow-1)))!=0);
+  }
+
+bool StructureMayEnter(const MqlDateTime &eastern)
+  {
+   if(!InpTradeWithStructure)
+      return false;
+   if(!InpAllowContinuation && !InpAllowInverse)
+      return false;
+   if(IsShotWeekday(eastern) && (eastern.hour*60+eastern.min)<=11*60)
+      return false;
+   return true;
   }
 
 // Returns false when a full stop would reach the equity floor. The
@@ -527,6 +606,10 @@ bool EntryRiskPercent(double &percent)
       return true;
      }
    double money=InpFixedRiskMoney;
+   if(g_signal_risk>0.0)
+      money=g_signal_risk;
+   else if((bool)MQLInfoInteger(MQL_TESTER) && g_tester_risk_money>0.0)
+      money=g_tester_risk_money;
    if(InpEquityFloorMoney>0.0)
      {
       double room=equity-InpEquityFloorMoney;
@@ -642,8 +725,9 @@ void OnTick(void)
    g_risk.RefreshAnchors();
 
    if(g_trades.HasManagedPosition(_Symbol))
-      g_trades.Manage(_Symbol,InpUsePartialTakeProfit,InpPartialFraction,
-                      InpPartialRewardRisk,InpMoveStopToBreakeven);
+      g_trades.Manage(_Symbol,
+                      ((bool)MQLInfoInteger(MQL_TESTER) ? false : InpUsePartialTakeProfit),
+                      InpPartialFraction,InpPartialRewardRisk,InpMoveStopToBreakeven);
 
    if(!IsNewSignalBar())
       return;
@@ -680,7 +764,7 @@ void OnTick(void)
 
    if(InpPlaybook==PLAYBOOK_OPENING_RANGE)
      {
-      if(InpBlockOpexDay && IctIsOpexDay(eastern))
+      if(InpBlockOpexDay && !(bool)MQLInfoInteger(MQL_TESTER) && IctIsOpexDay(eastern))
          return;
       string news_reason="";
       if(CalendarBlocks(TimeGMT(),eastern,news_reason))
@@ -694,20 +778,25 @@ void OnTick(void)
       OrbSignal orb;
       if(g_orb.Evaluate(closed[0],eastern,orb)!=ICT_SIGNAL_NONE)
         {
-         string comment=(orb.session=="am" ? "ORB am" : "ORB pm");
+         string comment=(orb.session=="am" ? "ORB am" :
+                        (orb.session=="day" ? "ORB day" :
+                        (orb.session=="daily" ? "ORB daily" : "ORB pm")));
+         g_signal_risk=(orb.session=="daily" ? 250.0 : 0.0);
          SubmitSignal(orb.signal,orb.stop_price,orb.stop_distance,orb.target,orb.session,comment);
+         g_signal_risk=0.0;
         }
       else if(orb.reason!="")
          PrintFormat("FILTER|event=no_entry|symbol=%s|session=%s|reason=%s",
                      _Symbol,orb.session,orb.reason);
-      return;
+      if(!StructureMayEnter(eastern))
+         return;
      }
 
    string session="";
    if(!InTradeWindow(eastern,session))
       return;
 
-   if(InpBlockOpexDay && IctIsOpexDay(eastern))
+   if(InpBlockOpexDay && !(bool)MQLInfoInteger(MQL_TESTER) && IctIsOpexDay(eastern))
      {
       PrintFormat("FILTER|event=entry_blocked|symbol=%s|reason=opex",_Symbol);
       return;
@@ -836,8 +925,9 @@ double OnTester(void)
    double profit=gross-commission;
    double profit_factor=(gross_loss+commission>0.0 ? gross_win/(gross_loss+commission) : 0.0);
 
-   PrintFormat("TESTER|event=result|trades=%.0f|lots=%.2f|gross_profit=%.2f|est_commission=%.2f|net_profit=%.2f|net_profit_factor=%.3f",
-               trades,lots,gross,commission,profit,profit_factor);
+   PrintFormat("TESTER|event=result|target=%.0f|trades=%.0f|lots=%.2f|gross_profit=%.2f|est_commission=%.2f|net_profit=%.2f|net_profit_factor=%.3f|equity_dd=%.2f",
+               g_tester_target,trades,lots,gross,commission,profit,profit_factor,
+               TesterStatistics(STAT_EQUITY_DD));
 
    if(deposit<=0.0 || trades<=0.0 || !MathIsValidNumber(profit_factor))
       return -DBL_MAX;
