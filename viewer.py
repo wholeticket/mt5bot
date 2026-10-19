@@ -90,8 +90,8 @@ function draw(bars, openPx, trade) {
   let lo = Math.min(...bars.map(b => b.l));
   let hi = Math.max(...bars.map(b => b.h));
   if (openPx) { lo = Math.min(lo, openPx - 60); hi = Math.max(hi, openPx + 60); }
-  if (trade) {
-    [trade.entry, trade.stop, trade.target].forEach(p => {
+    if (trade) {
+    [trade.entry, trade.stop, trade.target, trade.half].forEach(p => {
       if (p) { lo = Math.min(lo, p); hi = Math.max(hi, p); }
     });
   }
@@ -117,6 +117,7 @@ function draw(bars, openPx, trade) {
     hline(d, y, openPx - 60, "#c8b56a", "", true, true);
   }
   if (trade && trade.stop) hline(d, y, trade.stop, "#e07a72", "stop " + trade.stop.toFixed(2), false, true);
+  if (trade && trade.half && !trade.half_done) hline(d, y, trade.half, "#e0a050", "half " + trade.half.toFixed(2), true, false);
   if (trade && trade.entry) hline(d, y, trade.entry, "#e7e1d4", "entry " + trade.entry.toFixed(2), false, false);
   if (trade && trade.target) hline(d, y, trade.target, "#8fce7a", "target " + trade.target.toFixed(2), false, false);
   svg.innerHTML = d.parts;
@@ -132,7 +133,9 @@ async function tick() {
   document.getElementById("ea").textContent = data.ea;
   const cap = document.getElementById("caption");
   if (data.trade) {
-    cap.textContent = "White line is the entry. Red is the stop. Green is the target. The gold line is still the 09:30 open.";
+    cap.textContent = data.trade.half_done
+      ? "White line is the entry. The stop has moved up with the half close. Green is the target left on the rest."
+      : "White line is the entry. Red is the stop. Amber is where half comes off. Green is the target.";
   } else {
     cap.textContent = "M5 candles. The gold line is the 09:30 New York open. The dashed lines are 60 points either side, the size the 10:00 and 11:00 shots need.";
   }
@@ -226,7 +229,18 @@ def trade_view(position):
         in_points = entry - price
         to_stop = None if not stop else stop - price
         to_target = None if not target else price - target
-    comment = position.comment or ""
+    comment = (position.comment or "").strip()
+    if not comment:
+        deals = mt5.history_deals_get(position=position.ticket) or []
+        for deal in deals:
+            if deal.entry == mt5.DEAL_ENTRY_IN and deal.comment:
+                comment = deal.comment
+                break
+    gap = abs(entry - stop) if stop else None
+    half_done = gap is not None and gap < 5
+    half = None
+    if gap and not half_done:
+        half = entry + gap if buy else entry - gap
     return {
         "side": "buy" if buy else "sell",
         "name": trade_name(comment),
@@ -239,6 +253,8 @@ def trade_view(position):
         "in_points": in_points,
         "to_stop": to_stop,
         "to_target": to_target,
+        "half": half,
+        "half_done": half_done,
         "flat": "11:30 New York" if comment == "ORB am" else "15:55 New York",
     }
 
@@ -326,6 +342,7 @@ def snapshot():
             {"label": "Entry", "text": f"{trade['entry']:.2f}", "kind": trade["side"]},
             {"label": "Price now", "text": f"{trade['price']:.2f}, {trade['in_points']:+.1f} points, {money}", "kind": "buy" if trade["in_points"] >= 0 else "sell"},
             {"label": "Stop", "text": "not set" if not trade["stop"] else f"{trade['stop']:.2f}, {trade['to_stop']:.1f} points under the price" if trade["side"] == "buy" else f"{trade['stop']:.2f}, {trade['to_stop']:.1f} points above the price", "kind": "sell"},
+            {"label": "Half", "text": "Already sold. The stop is on the entry." if trade["half_done"] else (f"Sell half at {trade['half']:.2f}, then the stop moves to the entry" if trade["half"] else "Needs a stop before half can arm"), "kind": "wait"},
             {"label": "Target", "text": "not set" if not trade["target"] else f"{trade['target']:.2f}, {trade['to_target']:.1f} points to go", "kind": "buy"},
             {"label": "If neither hits", "text": f"Close at {trade['flat']}", "kind": "wait"},
             {"label": "Position", "text": pos_text, "kind": trade["side"]},
