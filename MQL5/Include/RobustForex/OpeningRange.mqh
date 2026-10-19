@@ -25,6 +25,16 @@ struct OrbSettings
    int    max_morning_entries; // 0 keeps the 2-or-3 cap
    bool   require_open_fail;   // short only after a checkpoint closed back at the open
    int    weekdays;            // bits Mon=1 Tue=2 Wed=4 Thu=8 Fri=16, 0 or 31 is every day
+   bool   morning_fade;        // the original 09:40-10:55 short
+   bool   day_shots;           // 10:00 fade and 11:00 continuation
+   double day_move;            // points from the 09:30 open
+   double day_target;          // points from the signal close
+   bool   daily_on;            // one trade a day, beside the shots
+   int    daily_minute;        // New York minute of that trade
+   int    daily_dir;           // 1 goes with the morning move, -1 fades it
+   double daily_min_move;
+   double daily_stop;
+   double daily_target;
   };
 
 struct OrbSignal
@@ -56,6 +66,11 @@ private:
    double      m_pm_close;
    int         m_pm_bars;
    bool        m_pm_done;
+   double      m_shot_open;
+   bool        m_shot_seen;
+   bool        m_fade10_done;
+   bool        m_with11_done;
+   bool        m_daily_done;
 
    void ResetDay(const int day)
      {
@@ -74,6 +89,11 @@ private:
       m_pm_close=0.0;
       m_pm_bars=0;
       m_pm_done=false;
+      m_shot_open=0.0;
+      m_shot_seen=false;
+      m_fade10_done=false;
+      m_with11_done=false;
+      m_daily_done=false;
      }
 
    void Remember(const MqlRates &bar,double &high,double &low,double &open_price,
@@ -282,6 +302,69 @@ public:
       return ICT_SIGNAL_SELL;
      }
 
+   // Two later shots off the same 09:30 open. At 10:00 a move of day_move
+   // points is faded. At 11:00 a move of that size is taken in its own
+   // direction. Each one gets a single try. The target is day_target
+   // points beyond that bar's close, and the position is held to the
+   // cash close rather than the 11:30 morning flat.
+   ENUM_ICT_SIGNAL DayShots(const MqlRates &bar,const int bar_min,
+                            double &stop_distance,double &target)
+     {
+      int open_min=9*60+30;
+      if(bar_min==open_min)
+        {
+         m_shot_open=bar.open;
+         m_shot_seen=true;
+        }
+      if(!m_shot_seen)
+         return ICT_SIGNAL_NONE;
+
+      bool fade_bar=(bar_min==10*60);
+      bool with_bar=(bar_min==11*60);
+      if(!fade_bar && !with_bar)
+         return ICT_SIGNAL_NONE;
+      if((fade_bar && m_fade10_done) || (with_bar && m_with11_done))
+         return ICT_SIGNAL_NONE;
+      if(fade_bar)
+         m_fade10_done=true;
+      else
+         m_with11_done=true;
+
+      double move=bar.close-m_shot_open;
+      if(MathAbs(move)<m_cfg.day_move)
+         return ICT_SIGNAL_NONE;
+
+      bool buy=(fade_bar ? move<0.0 : move>0.0);
+      stop_distance=m_cfg.fixed_stop;
+      target=bar.close+(buy ? m_cfg.day_target : -m_cfg.day_target);
+      return (buy ? ICT_SIGNAL_BUY : ICT_SIGNAL_SELL);
+     }
+
+   // One trade on the 11:00 bar, in the direction of the move since 09:30.
+   // A flat morning is left alone. This does not replace the 60-point shots.
+   ENUM_ICT_SIGNAL DailyOnce(const MqlRates &bar,const int bar_min,
+                             double &stop_distance,double &target)
+     {
+      int open_min=9*60+30;
+      if(bar_min==open_min)
+        {
+         m_shot_open=bar.open;
+         m_shot_seen=true;
+        }
+      if(m_daily_done || !m_shot_seen || bar_min!=m_cfg.daily_minute)
+         return ICT_SIGNAL_NONE;
+
+      m_daily_done=true;
+      double move=bar.close-m_shot_open;
+      if(MathAbs(move)<m_cfg.daily_min_move || MathAbs(move)<0.5)
+         return ICT_SIGNAL_NONE;
+
+      bool buy=(m_cfg.daily_dir>=0 ? move>0.0 : move<0.0);
+      stop_distance=m_cfg.daily_stop;
+      target=bar.close+(buy ? m_cfg.daily_target : -m_cfg.daily_target);
+      return (buy ? ICT_SIGNAL_BUY : ICT_SIGNAL_SELL);
+     }
+
    // Buy only after the first 30 minutes of the afternoon have already
    // fallen 20 points, and only Wednesday through Friday. Monday and
    // Tuesday buys of this same dip lost the profit.
@@ -328,32 +411,62 @@ public:
       if(day!=m_day)
          ResetDay(day);
 
-      // Monday, Thursday and Friday made the money on the 2026 tape.
-      // Tuesday was the losing day. Wednesday's stops are what walked
-      // the account through the $45,000 floor. 0 and 31 keep every day.
+      // The 60-point shots stay on their days. The once-a-day trade is
+      // allowed on the other weekdays as well.
       int dow=eastern.day_of_week;
-      if(m_cfg.weekdays>0 && m_cfg.weekdays<31 && dow>=1 && dow<=5 &&
-         (m_cfg.weekdays&(1<<(dow-1)))==0)
+      if(dow<1 || dow>5)
          return ICT_SIGNAL_NONE;
+      bool shot_day=true;
+      if(m_cfg.weekdays>0 && m_cfg.weekdays<31)
+         shot_day=((m_cfg.weekdays&(1<<(dow-1)))!=0);
 
       int bar_min=eastern.hour*60+eastern.min;
       if(m_cfg.style==2)
         {
-         ENUM_ICT_SIGNAL fade=MorningShorts(bar,bar_min,out.stop_distance,out.target);
-         if(fade!=ICT_SIGNAL_NONE)
+         if(shot_day && m_cfg.morning_fade)
            {
-            out.signal=fade;
-            out.session="am";
-            return fade;
+            ENUM_ICT_SIGNAL fade=MorningShorts(bar,bar_min,out.stop_distance,out.target);
+            if(fade!=ICT_SIGNAL_NONE)
+              {
+               out.signal=fade;
+               out.session="am";
+               return fade;
+              }
            }
-         ENUM_ICT_SIGNAL buy=AfternoonLong(bar,bar_min,eastern.day_of_week,
-                                           out.stop_distance,out.target);
-         if(buy!=ICT_SIGNAL_NONE || m_cfg.morning_only)
+         if(shot_day && m_cfg.day_shots)
            {
-            out.signal=buy;
-            out.session=(buy==ICT_SIGNAL_BUY ? "pm" : "am");
-            return buy;
+            ENUM_ICT_SIGNAL shot=DayShots(bar,bar_min,out.stop_distance,out.target);
+            if(shot!=ICT_SIGNAL_NONE)
+              {
+               out.signal=shot;
+               out.session="day";
+               return shot;
+              }
            }
+         if(m_cfg.daily_on)
+           {
+            ENUM_ICT_SIGNAL daily=DailyOnce(bar,bar_min,out.stop_distance,out.target);
+            if(daily!=ICT_SIGNAL_NONE)
+              {
+               out.signal=daily;
+               out.session="daily";
+               return daily;
+              }
+           }
+         if(!shot_day)
+            return ICT_SIGNAL_NONE;
+         // Afternoon dip stays on with the day shots. A shot still open
+         // blocks it, because a new order is only sent when the book is flat.
+         {
+            ENUM_ICT_SIGNAL buy=AfternoonLong(bar,bar_min,eastern.day_of_week,
+                                              out.stop_distance,out.target);
+            if(buy!=ICT_SIGNAL_NONE || m_cfg.morning_only)
+              {
+               out.signal=buy;
+               out.session=(buy==ICT_SIGNAL_BUY ? "pm" : "am");
+               return buy;
+              }
+         }
         }
 
       int am_start=9*60+30;
