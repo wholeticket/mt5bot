@@ -136,7 +136,12 @@ int IctEasternOffsetSeconds(const datetime gmt)
 
 datetime IctServerToGmt(const datetime server_time)
   {
-   return (datetime)((long)server_time-((long)TimeCurrent()-(long)TimeGMT()));
+   // The raw difference wobbles by a second. A bar that opens at
+   // 10:00:00 would otherwise look like 09:59:59 and the shot would miss.
+   long raw=(long)TimeCurrent()-(long)TimeGMT();
+   long hours=(raw>=0 ? (raw+1800)/3600 : (raw-1800)/3600);
+   long offset=hours*3600;
+   return (datetime)((long)server_time-offset);
   }
 
 void IctGmtToEastern(const datetime gmt,MqlDateTime &eastern)

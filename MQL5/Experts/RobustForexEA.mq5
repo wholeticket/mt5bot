@@ -1,5 +1,5 @@
 #property copyright "RobustForexEA"
-#property version   "6.16"
+#property version   "6.17"
 #property description "NY-session Nasdaq EA. Opening-range breaks, with the ICT fair-value-gap model still available."
 
 #include <RobustForex/Strategy.mqh>
@@ -108,6 +108,11 @@ input group "Execution"
 input ulong InpMagicNumber=26101201;
 input int   InpMaximumSpreadPoints=80; // broker points, not index points
 input int   InpDeviationPoints=20;
+
+input group "Ride"
+input bool   InpRideMoves=true;      // after 11:00, hop on a move already underway
+input double InpRideMinMove=12.0;    // points the last half hour already traveled
+input double InpRideRiskMoney=400.0; // dollars at risk on a hop; shots keep their own risk
 
 CIctStrategy        g_strategy;
 COpeningRange       g_orb;
@@ -412,6 +417,7 @@ string ModelName(const ENUM_ICT_MODEL model)
 
 string BotLabel(void);
 void ShowBotLabel(void);
+void ReplayOpeningRange(void);
 
 int OnInit(void)
   {
@@ -515,7 +521,137 @@ int OnInit(void)
                orb.fixed_stop,orb.day_target,InpFixedRiskMoney);
    PrintFormat("EA|event=structure|enabled=%d|continuation=%d|inverse=%d",
                (int)InpTradeWithStructure,(int)InpAllowContinuation,(int)InpAllowInverse);
+   ReplayOpeningRange();
+   PrintFormat("EA|event=ride|enabled=%d|min_move=%.0f|risk=%.0f",
+               (int)InpRideMoves,InpRideMinMove,InpRideRiskMoney);
    return INIT_SUCCEEDED;
+  }
+
+// A restart forgets the 09:30 open. Walk today's closed bars so the
+// 11:00 shot still knows that open, and so a shot already checked is
+// not taken a second time.
+void ReplayOpeningRange(void)
+  {
+   MqlRates bars[];
+   ArraySetAsSeries(bars,false);
+   int copied=CopyRates(_Symbol,PERIOD_M5,1,200,bars);
+   if(copied<=0)
+      return;
+   bool newest_first=(copied>1 && bars[0].time>bars[copied-1].time);
+   int opens=0;
+   for(int n=0;n<copied;n++)
+     {
+      int i=(newest_first ? copied-1-n : n);
+      MqlDateTime eastern;
+      IctGmtToEastern(IctServerToGmt(bars[i].time),eastern);
+      if(eastern.hour==9 && eastern.min==30)
+         opens++;
+      OrbSignal orb;
+      g_orb.Evaluate(bars[i],eastern,orb);
+     }
+   double open_price=0.0;
+   bool seen=false,fade_done=false,with_done=false,daily_done=false;
+   g_orb.ShotState(open_price,seen,fade_done,with_done,daily_done);
+   PrintFormat("EA|event=replay|bars=%d|order=%s|opens=%d|shot_open=%.2f|seen=%d|fade10=%d|with11=%d|daily=%d",
+               copied,(newest_first ? "new_first" : "old_first"),opens,
+               open_price,(int)seen,(int)fade_done,(int)with_done,(int)daily_done);
+  }
+
+int RideDayKey(const MqlDateTime &eastern)
+  {
+   return eastern.year*10000+eastern.mon*100+eastern.day;
+  }
+
+int RideCount(const MqlDateTime &eastern)
+  {
+   if(!GlobalVariableCheck("mt5bot.ride.day"))
+      return 0;
+   if((int)GlobalVariableGet("mt5bot.ride.day")!=RideDayKey(eastern))
+      return 0;
+   return (int)GlobalVariableGet("mt5bot.ride.count");
+  }
+
+void MarkRide(const MqlDateTime &eastern)
+  {
+   int count=RideCount(eastern)+1;
+   GlobalVariableSet("mt5bot.ride.day",RideDayKey(eastern));
+   GlobalVariableSet("mt5bot.ride.count",count);
+  }
+
+// The 11:00 bar belongs to the shots. A hop can use a later bar, and
+// only while the New York window is still open.
+bool RideMayEnter(const MqlDateTime &eastern)
+  {
+   if(!InpRideMoves || InpRideMinMove<=0.0)
+      return false;
+   if(eastern.day_of_week<1 || eastern.day_of_week>5)
+      return false;
+   if(eastern.hour*60+eastern.min<=11*60)
+      return false;
+   if(RideCount(eastern)>=2)
+      return false;
+   string session="";
+   return InTradeWindow(eastern,session);
+  }
+
+// Last six closed M5 bars. The move has to already be there, and it
+// cannot have given back half of that push. The target is a slice of
+// the move, not the 155-point shot.
+bool TryRide(const MqlDateTime &eastern)
+  {
+   MqlRates rates[];
+   ArraySetAsSeries(rates,true);
+   if(CopyRates(_Symbol,PERIOD_M5,1,6,rates)!=6)
+      return false;
+
+   double net=rates[0].close-rates[5].open;
+   if(MathAbs(net)<InpRideMinMove)
+      return false;
+
+   bool buy=(net>0.0);
+   double pullback=0.0;
+   if(buy)
+     {
+      double extreme=rates[0].high;
+      for(int i=1;i<6;i++)
+         extreme=MathMax(extreme,rates[i].high);
+      pullback=extreme-rates[0].close;
+     }
+   else
+     {
+      double extreme=rates[0].low;
+      for(int i=1;i<6;i++)
+         extreme=MathMin(extreme,rates[i].low);
+      pullback=rates[0].close-extreme;
+     }
+   if(pullback>MathAbs(net)*0.5)
+      return false;
+
+   double bite=MathAbs(net)*0.40;
+   if(bite<8.0)
+      bite=8.0;
+   if(bite>25.0)
+      bite=25.0;
+   double stop_distance=pullback+2.0;
+   if(stop_distance<8.0)
+      stop_distance=8.0;
+   if(stop_distance>20.0)
+      stop_distance=20.0;
+   if(bite<stop_distance*InpMinRewardRisk)
+      return false;
+
+   ENUM_ICT_SIGNAL signal=(buy ? ICT_SIGNAL_BUY : ICT_SIGNAL_SELL);
+   double target=rates[0].close+(buy ? bite : -bite);
+   g_signal_risk=(InpRideRiskMoney>0.0 ? InpRideRiskMoney : 400.0);
+   bool sent=SubmitSignal(signal,0.0,stop_distance,target,"ride","ORB ride");
+   g_signal_risk=0.0;
+   if(sent)
+     {
+      MarkRide(eastern);
+      PrintFormat("EA|event=ride|side=%s|move=%.1f|bite=%.1f|stop=%.1f",
+                  (buy ? "buy" : "sell"),net,bite,stop_distance);
+     }
+   return sent;
   }
 
 string BotLabel(void)
@@ -553,6 +689,8 @@ void ShowBotLabel(void)
    string structure="";
    if(InpTradeWithStructure && (InpAllowContinuation || InpAllowInverse))
       structure="\nalso long or short when structure agrees, shots go first";
+   if(InpRideMoves)
+      structure+="\nafter 11:00, hop on a move already going and take a small bite";
    if(InpDayShots && !InpOrbMorningFade)
      {
       Comment(BotLabel()+"\n"+risk+"\n"+
@@ -776,18 +914,26 @@ void OnTick(void)
          return;
 
       OrbSignal orb;
+      bool shot_sent=false;
       if(g_orb.Evaluate(closed[0],eastern,orb)!=ICT_SIGNAL_NONE)
         {
          string comment=(orb.session=="am" ? "ORB am" :
                         (orb.session=="day" ? "ORB day" :
                         (orb.session=="daily" ? "ORB daily" : "ORB pm")));
          g_signal_risk=(orb.session=="daily" ? 250.0 : 0.0);
-         SubmitSignal(orb.signal,orb.stop_price,orb.stop_distance,orb.target,orb.session,comment);
+         shot_sent=SubmitSignal(orb.signal,orb.stop_price,orb.stop_distance,orb.target,orb.session,comment);
          g_signal_risk=0.0;
         }
       else if(orb.reason!="")
          PrintFormat("FILTER|event=no_entry|symbol=%s|session=%s|reason=%s",
                      _Symbol,orb.session,orb.reason);
+      if(shot_sent)
+         return;
+      if(InpRideMoves && RideMayEnter(eastern) && !g_trades.HasAnyPosition(_Symbol))
+        {
+         if(TryRide(eastern))
+            return;
+        }
       if(!StructureMayEnter(eastern))
          return;
      }

@@ -156,6 +156,28 @@ def server_offset_hours(tick_time):
     return int(round(delta / 3600.0))
 
 
+def ride_view(bars, minutes):
+    if minutes <= 11 * 60:
+        return "wait", "Waits until the 11:00 shot bar is done"
+    closed = bars[:-1]
+    if len(closed) < 6:
+        return "wait", "Waiting for a half hour of bars"
+    window = closed[-6:]
+    net = window[-1]["c"] - window[0]["o"]
+    if abs(net) < 12:
+        return "pass", f"Last half hour moved {net:+.1f}, needs 12"
+    buy = net > 0
+    if buy:
+        pullback = max(bar["h"] for bar in window) - window[-1]["c"]
+    else:
+        pullback = window[-1]["c"] - min(bar["l"] for bar in window)
+    if pullback > abs(net) * 0.5:
+        return "pass", "The move has given back half"
+    bite = min(25.0, max(8.0, abs(net) * 0.40))
+    word = "Buy" if buy else "Sell"
+    return ("buy" if buy else "sell"), f"{word} the move, take about {bite:.0f} points"
+
+
 def side_for(move, fade):
     if abs(move) < SHOT_POINTS:
         return "pass", f"{abs(move):.1f} points, needs {SHOT_POINTS:.0f}"
@@ -225,12 +247,8 @@ def snapshot():
                 verdict = "11:00 shot is lining up a " + ("buy" if kind == "buy" else "sell")
                 verdict_kind = kind
         else:
-            verdict = "Shots have had their bar. Structure can look for a long or a short."
+            verdict = "Shots have had their bar. A ride can hop on a move already going."
             verdict_kind = "wait"
-
-    if not spread_ok:
-        verdict = "Spread is too wide to send an order"
-        verdict_kind = "pass"
 
     ten_kind, ten_text = ("wait", "Waiting for the 09:30 open") if move is None else side_for(move, True)
     eleven_kind, eleven_text = ("wait", "Waiting for the 09:30 open") if move is None else side_for(move, False)
@@ -249,6 +267,15 @@ def snapshot():
     else:
         structure = "Allowed to look. It still needs a clean fair-value gap."
 
+    ride_kind, ride_text = ride_view(bars, minutes)
+    if not managed and minutes > 11 * 60 and ride_kind in ("buy", "sell"):
+        verdict = ride_text
+        verdict_kind = ride_kind
+
+    if not spread_ok:
+        verdict = "Spread is too wide to send an order"
+        verdict_kind = "pass"
+
     rows = [
         {"label": "New York", "text": now.strftime("%H:%M"), "kind": "wait"},
         {"label": "Spread", "text": f"{spread:.0f} points, max {SPREAD_MAX}", "kind": "wait" if spread_ok else "pass"},
@@ -257,6 +284,7 @@ def snapshot():
         {"label": "11:00 with the move", "text": eleven_text, "kind": eleven_kind},
         {"label": "11:00 fallback", "text": fall_text, "kind": fall_kind},
         {"label": "Structure long or short", "text": structure, "kind": "wait"},
+        {"label": "Ride", "text": ride_text, "kind": ride_kind},
         {"label": "Position", "text": pos_text, "kind": "buy" if managed and managed[0].type == mt5.POSITION_TYPE_BUY else ("sell" if managed else "pass")},
     ]
     account = ""

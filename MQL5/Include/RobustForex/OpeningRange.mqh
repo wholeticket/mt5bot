@@ -229,6 +229,15 @@ private:
      }
 
 public:
+   void ShotState(double &open_price,bool &seen,bool &fade_done,bool &with_done,bool &daily_done) const
+     {
+      open_price=m_shot_open;
+      seen=m_shot_seen;
+      fade_done=m_fade10_done;
+      with_done=m_with11_done;
+      daily_done=m_daily_done;
+     }
+
                      COpeningRange(void)
      {
       m_day=0;
