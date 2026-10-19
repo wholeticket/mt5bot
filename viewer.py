@@ -1,8 +1,8 @@
 """Live view of the pass bot weighing US100.cash. Read only. Sends no orders.
 
-Open http://127.0.0.1:8765/ while MetaTrader is logged into the FTMO demo.
-The same page is also on http://127.0.0.1:18765/ because that is the port
-the browser tab was opened on.
+The page listens on this PC, ports 8765 and 18765.
+127.0.0.1 only works in a browser on this PC. From the laptop, open the
+PC's own address on the same network, or the tunnel URL printed at startup.
 """
 
 import json
@@ -17,7 +17,7 @@ SYMBOL = "US100.cash"
 MAGIC = 26101201
 SPREAD_MAX = 250
 SHOT_POINTS = 60.0
-HOST = "127.0.0.1"
+HOST = "0.0.0.0"
 PORTS = (8765, 18765)
 LOG = Path(r"C:\Users\user\AppData\Roaming\MetaQuotes\Terminal\D0E8209F77C8CF37AD8BF550E51FF075\MQL5\logs")
 
