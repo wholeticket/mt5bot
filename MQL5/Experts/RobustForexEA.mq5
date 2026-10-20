@@ -1,6 +1,6 @@
 #property copyright "RobustForexEA"
-#property version   "6.17"
-#property description "NY-session Nasdaq EA. Opening-range breaks, with the ICT fair-value-gap model still available."
+#property version   "6.18"
+#property description "NY-session Nasdaq EA, plus a gold scalp that steps aside for the shots."
 
 #include <RobustForex/Strategy.mqh>
 #include <RobustForex/OpeningRange.mqh>
@@ -110,15 +110,24 @@ input int   InpMaximumSpreadPoints=80; // broker points, not index points
 input int   InpDeviationPoints=20;
 
 input group "Ride"
-input bool   InpRideMoves=true;      // after 11:00, hop on a move already underway
+input bool   InpRideMoves=false;     // after 11:00 hop is off; empty days use the 11:00 trade
 input double InpRideMinMove=12.0;    // points the last half hour already traveled
 input double InpRideRiskMoney=400.0; // dollars at risk on a hop; shots keep their own risk
+
+input group "Gold"
+input bool   InpGoldMoves=true;          // buy or sell gold when a move is already going
+input string InpGoldSymbol="XAUUSD";     // FTMO gold spot
+input double InpGoldMinMove=1.20;        // dollars in the last 3 minutes
+input double InpGoldRiskMoney=250.0;     // dollars at risk; Nasdaq shots keep their own risk
+input int    InpGoldMaxPerDay=2;
+input int    InpGoldMaxSpreadPoints=60;  // 60 points is 0.60 on gold
 
 CIctStrategy        g_strategy;
 COpeningRange       g_orb;
 CRiskManager        g_risk;
 CRobustTradeManager g_trades;
 datetime            g_last_bar_time=0;
+datetime            g_gold_bar=0;
 double              g_tester_target=0.0;
 double              g_tester_risk_money=0.0;
 double              g_signal_risk=0.0;
@@ -138,6 +147,10 @@ bool InputsAreValid(void)
        (InpDayShots && (InpDayShotPoints<=0.0 || InpDayShotTarget<=0.0))))
       return false;
    if(!InpTradeNyAm && !InpTradeNyPm)
+      return false;
+   if(InpGoldMoves &&
+      (InpGoldMinMove<=0.0 || InpGoldRiskMoney<=0.0 || InpGoldMaxPerDay<1 ||
+       InpGoldMaxSpreadPoints<0 || StringLen(InpGoldSymbol)==0))
       return false;
    if(InpEntryTimeframe==PERIOD_CURRENT ||
       InpStructureTimeframe==PERIOD_CURRENT ||
@@ -417,7 +430,9 @@ string ModelName(const ENUM_ICT_MODEL model)
 
 string BotLabel(void);
 void ShowBotLabel(void);
+bool RideEnabled(void);
 void ReplayOpeningRange(void);
+bool IsShotWeekday(const MqlDateTime &eastern);
 
 int OnInit(void)
   {
@@ -523,7 +538,11 @@ int OnInit(void)
                (int)InpTradeWithStructure,(int)InpAllowContinuation,(int)InpAllowInverse);
    ReplayOpeningRange();
    PrintFormat("EA|event=ride|enabled=%d|min_move=%.0f|risk=%.0f",
-               (int)InpRideMoves,InpRideMinMove,InpRideRiskMoney);
+               (int)RideEnabled(),InpRideMinMove,InpRideRiskMoney);
+   if(InpGoldMoves)
+      SymbolSelect(InpGoldSymbol,true);
+   PrintFormat("EA|event=gold|enabled=%d|symbol=%s|min_move=%.2f|risk=%.0f|max=%d",
+               (int)InpGoldMoves,InpGoldSymbol,InpGoldMinMove,InpGoldRiskMoney,InpGoldMaxPerDay);
    return INIT_SUCCEEDED;
   }
 
@@ -555,6 +574,13 @@ void ReplayOpeningRange(void)
    PrintFormat("EA|event=replay|bars=%d|order=%s|opens=%d|shot_open=%.2f|seen=%d|fade10=%d|with11=%d|daily=%d",
                copied,(newest_first ? "new_first" : "old_first"),opens,
                open_price,(int)seen,(int)fade_done,(int)with_done,(int)daily_done);
+  }
+
+// Both hops on the new account stopped out. Empty days stay with the
+// one 11:00 trade. The 60-point shot is unchanged.
+bool RideEnabled(void)
+  {
+   return false;
   }
 
 int RideDayKey(const MqlDateTime &eastern)
@@ -654,6 +680,214 @@ bool TryRide(const MqlDateTime &eastern)
    return sent;
   }
 
+int GoldDayKey(const MqlDateTime &eastern)
+  {
+   return eastern.year*10000+eastern.mon*100+eastern.day;
+  }
+
+int GoldCount(const MqlDateTime &eastern)
+  {
+   if(!GlobalVariableCheck("mt5bot.gold.day"))
+      return 0;
+   if((int)GlobalVariableGet("mt5bot.gold.day")!=GoldDayKey(eastern))
+      return 0;
+   return (int)GlobalVariableGet("mt5bot.gold.count");
+  }
+
+void MarkGold(const MqlDateTime &eastern)
+  {
+   int count=GoldCount(eastern)+1;
+   GlobalVariableSet("mt5bot.gold.day",GoldDayKey(eastern));
+   GlobalVariableSet("mt5bot.gold.count",count);
+  }
+
+// Shot days need the account free from 09:50 through the 11:00 bar.
+// Other weekdays still have the one 11:00 Nasdaq trade, so gold
+// steps aside from 10:50 until that bar has closed.
+bool GoldBlockedForShots(const MqlDateTime &eastern)
+  {
+   int minute=eastern.hour*60+eastern.min;
+   if(minute>11*60)
+      return false;
+   if(IsShotWeekday(eastern))
+      return minute>=9*60+50;
+   return minute>=10*60+50;
+  }
+
+bool GoldWindowOpen(const MqlDateTime &eastern)
+  {
+   int minute=eastern.hour*60+eastern.min;
+   return minute>=3*60 && minute<16*60;
+  }
+
+void ManageGold(void)
+  {
+   if(!InpGoldMoves || StringLen(InpGoldSymbol)==0)
+      return;
+   if(!g_trades.HasManagedPosition(InpGoldSymbol))
+      return;
+   g_trades.Manage(InpGoldSymbol,
+                   ((bool)MQLInfoInteger(MQL_TESTER) ? false : InpUsePartialTakeProfit),
+                   InpPartialFraction,InpPartialRewardRisk,InpMoveStopToBreakeven);
+  }
+
+void FlatGold(const MqlDateTime &eastern)
+  {
+   if(!InpGoldMoves || !g_trades.HasManagedPosition(InpGoldSymbol))
+      return;
+   int minute=eastern.hour*60+eastern.min;
+   if(minute<16*60 && !GoldBlockedForShots(eastern))
+      return;
+
+   ulong ticket=0;
+   ENUM_POSITION_TYPE type=POSITION_TYPE_BUY;
+   datetime open_time=0;
+   if(!g_trades.ManagedPosition(InpGoldSymbol,ticket,type,open_time))
+      return;
+   if(!PositionSelectByTicket(ticket))
+      return;
+   if(StringFind(PositionGetString(POSITION_COMMENT),"Gold hop")<0)
+      return;
+   g_trades.CloseManaged(InpGoldSymbol,(minute>=16*60 ? "session_flat" : "shot_wait"));
+  }
+
+bool SubmitGold(const ENUM_ICT_SIGNAL signal,const double stop_distance,const double target_price)
+  {
+   double entry=0.0;
+   double stop=0.0;
+   double target=0.0;
+   if(!g_trades.BuildIctLevels(InpGoldSymbol,signal,0.0,stop_distance,target_price,
+                               InpMinRewardRisk,entry,stop,target))
+      return false;
+
+   g_signal_risk=InpGoldRiskMoney;
+   double risk_percent=0.0;
+   bool risk_ok=EntryRiskPercent(risk_percent);
+   g_signal_risk=0.0;
+   if(!risk_ok)
+     {
+      PrintFormat("RISK|event=entry_blocked|symbol=%s|reason=equity_floor|equity=%.2f|floor=%.2f",
+                  InpGoldSymbol,AccountInfoDouble(ACCOUNT_EQUITY),InpEquityFloorMoney);
+      return false;
+     }
+
+   ENUM_ORDER_TYPE order_type=(signal==ICT_SIGNAL_BUY ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
+   double volume=g_risk.CalculateVolume(InpGoldSymbol,order_type,entry,stop,risk_percent,
+                                        InpMinLotRiskCapPercent);
+   double planned_risk=g_risk.RiskPercentForVolume(InpGoldSymbol,order_type,entry,stop,volume);
+   if(planned_risk<=0.0)
+      planned_risk=risk_percent;
+
+   string risk_reason="";
+   if(!g_risk.CanOpen(InpMagicNumber,InpMaxPortfolioPositions,planned_risk,
+                      InpMaxPortfolioRiskPercent,InpMaxDailyLossPercent,
+                      InpMaxEquityDrawdownPercent,InpDrawdownCooldownDays,risk_reason,
+                      InpMaxDailyLossMoney,InpMaxDrawdownMoney,InpHaltOnDrawdown))
+     {
+      PrintFormat("RISK|event=entry_blocked|symbol=%s|reason=%s|planned_risk=%.2f",
+                  InpGoldSymbol,risk_reason,planned_risk);
+      return false;
+     }
+
+   PrintFormat("SIGNAL|symbol=%s|session=gold|side=%s|stop=%.2f|target=%.2f|volume=%.4f|risk=%.2f",
+               InpGoldSymbol,(signal==ICT_SIGNAL_BUY ? "buy" : "sell"),
+               stop,target,volume,planned_risk);
+   return g_trades.Open(InpGoldSymbol,signal,volume,stop,target,"Gold hop");
+  }
+
+// Last three closed minutes of gold. The move has to already be there.
+// Nasdaq shots keep the account when their bars are due.
+bool TryGold(void)
+  {
+   if(!InpGoldMoves || InpGoldMinMove<=0.0 || StringLen(InpGoldSymbol)==0)
+      return false;
+   if(AccountInfoInteger(ACCOUNT_TRADE_ALLOWED)==0)
+      return false;
+
+   MqlDateTime eastern;
+   IctGmtToEastern(TimeGMT(),eastern);
+   if(eastern.day_of_week<1 || eastern.day_of_week>5)
+      return false;
+   if(!GoldWindowOpen(eastern) || GoldBlockedForShots(eastern))
+      return false;
+   if(GoldCount(eastern)>=InpGoldMaxPerDay)
+      return false;
+   if(g_trades.HasAnyPosition(_Symbol) || g_trades.HasAnyPosition(InpGoldSymbol))
+      return false;
+   if(!SymbolSelect(InpGoldSymbol,true))
+      return false;
+
+   MqlRates rates[];
+   ArraySetAsSeries(rates,true);
+   if(CopyRates(InpGoldSymbol,PERIOD_M1,1,3,rates)!=3)
+      return false;
+   if(rates[0].time==g_gold_bar)
+      return false;
+   g_gold_bar=rates[0].time;
+
+   double net=rates[0].close-rates[2].open;
+   if(MathAbs(net)<InpGoldMinMove)
+      return false;
+
+   bool buy=(net>0.0);
+   double pullback=0.0;
+   if(buy)
+     {
+      double extreme=rates[0].high;
+      for(int i=1;i<3;i++)
+         extreme=MathMax(extreme,rates[i].high);
+      pullback=extreme-rates[0].close;
+     }
+   else
+     {
+      double extreme=rates[0].low;
+      for(int i=1;i<3;i++)
+         extreme=MathMin(extreme,rates[i].low);
+      pullback=rates[0].close-extreme;
+     }
+   if(pullback>MathAbs(net)*0.5)
+      return false;
+
+   MqlTick tick;
+   double point=SymbolInfoDouble(InpGoldSymbol,SYMBOL_POINT);
+   if(!SymbolInfoTick(InpGoldSymbol,tick) || point<=0.0)
+      return false;
+   double spread_points=(tick.ask-tick.bid)/point;
+   if(spread_points>InpGoldMaxSpreadPoints)
+     {
+      PrintFormat("EA|event=gold|state=spread|points=%.1f|max=%d",
+                  spread_points,InpGoldMaxSpreadPoints);
+      return false;
+     }
+
+   double bite=MathAbs(net)*0.50;
+   if(bite<0.90)
+      bite=0.90;
+   if(bite>2.50)
+      bite=2.50;
+   double stop_distance=pullback+0.30;
+   if(stop_distance<0.80)
+      stop_distance=0.80;
+   if(stop_distance>1.60)
+      stop_distance=1.60;
+   if(bite<stop_distance*InpMinRewardRisk)
+      return false;
+   if(bite<spread_points*point*2.0)
+      return false;
+
+   double entry=(buy ? tick.ask : tick.bid);
+   double target=entry+(buy ? bite : -bite);
+   ENUM_ICT_SIGNAL signal=(buy ? ICT_SIGNAL_BUY : ICT_SIGNAL_SELL);
+   bool sent=SubmitGold(signal,stop_distance,target);
+   if(sent)
+     {
+      MarkGold(eastern);
+      PrintFormat("EA|event=gold|side=%s|move=%.2f|bite=%.2f|stop=%.2f|spread=%.1f",
+                  (buy ? "buy" : "sell"),net,bite,stop_distance,spread_points);
+     }
+   return sent;
+  }
+
 string BotLabel(void)
   {
    if(InpOrbRequireOpenFail && InpFixedRiskMoney>0.0 && InpOrbMaxMorningEntries==1)
@@ -689,8 +923,10 @@ void ShowBotLabel(void)
    string structure="";
    if(InpTradeWithStructure && (InpAllowContinuation || InpAllowInverse))
       structure="\nalso long or short when structure agrees, shots go first";
-   if(InpRideMoves)
+   if(RideEnabled())
       structure+="\nafter 11:00, hop on a move already going and take a small bite";
+   if(InpGoldMoves)
+      structure+="\nGold buys or sells a move already going, and stands aside for the Nasdaq shots";
    if(InpDayShots && !InpOrbMorningFade)
      {
       Comment(BotLabel()+"\n"+risk+"\n"+
@@ -858,8 +1094,29 @@ bool SubmitSignal(const ENUM_ICT_SIGNAL signal,const double stop_price,const dou
    return g_trades.Open(_Symbol,signal,volume,stop,target,comment);
   }
 
+void NoteTradeAccess(void)
+  {
+   static bool warned=false;
+   if(AccountInfoInteger(ACCOUNT_TRADE_ALLOWED)==0)
+     {
+      warned=true;
+      Comment(BotLabel()+"\n"+
+              "Trading is off\n"+
+              "The server is rejecting every order\n"+
+              StringFormat("Balance $%.0f",AccountInfoDouble(ACCOUNT_BALANCE))+"\n"+
+              "No new trade will be sent");
+      return;
+     }
+   if(warned)
+     {
+      warned=false;
+      ShowBotLabel();
+     }
+  }
+
 void OnTick(void)
   {
+   NoteTradeAccess();
    g_risk.RefreshAnchors();
 
    if(g_trades.HasManagedPosition(_Symbol))
@@ -867,8 +1124,16 @@ void OnTick(void)
                       ((bool)MQLInfoInteger(MQL_TESTER) ? false : InpUsePartialTakeProfit),
                       InpPartialFraction,InpPartialRewardRisk,InpMoveStopToBreakeven);
 
+   MqlDateTime gold_clock;
+   IctGmtToEastern(TimeGMT(),gold_clock);
+   ManageGold();
+   FlatGold(gold_clock);
+
    if(!IsNewSignalBar())
+     {
+      TryGold();
       return;
+     }
 
    if(FlatOpeningRange())
       return;
@@ -929,7 +1194,7 @@ void OnTick(void)
                      _Symbol,orb.session,orb.reason);
       if(shot_sent)
          return;
-      if(InpRideMoves && RideMayEnter(eastern) && !g_trades.HasAnyPosition(_Symbol))
+      if(RideEnabled() && RideMayEnter(eastern) && !g_trades.HasAnyPosition(_Symbol))
         {
          if(TryRide(eastern))
             return;

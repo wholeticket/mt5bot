@@ -254,6 +254,12 @@ public:
                      symbol,(volume<=0.0 ? "invalid_volume" : "existing_position"));
          return false;
         }
+      if(AccountInfoInteger(ACCOUNT_TRADE_ALLOWED)==0)
+        {
+         PrintFormat("TRADE|event=open_blocked|symbol=%s|reason=trade_disabled|balance=%.2f",
+                     symbol,AccountInfoDouble(ACCOUNT_BALANCE));
+         return false;
+        }
 
       m_trade.SetTypeFillingBySymbol(symbol);
       bool request_ok=false;

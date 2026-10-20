@@ -85,6 +85,10 @@ def side_name(position_type):
     return "BUY" if position_type == mt5.POSITION_TYPE_BUY else "SELL"
 
 
+def lots_text(volume):
+    return f"{volume:.0f}" if volume >= 10 else f"{volume:.2f}"
+
+
 def connect():
     if mt5.terminal_info() is not None:
         return True
@@ -100,17 +104,18 @@ def account_text():
         return "MetaTrader is open, but the FTMO login is disconnected."
     lines = [
         "PASS BOT",
+        f"Login {info.login}",
         f"Balance {money(info.balance)}",
         f"Equity {money(info.equity)}",
-        "Algo Trading is on" if terminal.trade_allowed else "Algo Trading is off, so no order can be sent",
+        "Trading is on" if info.trade_allowed and terminal.trade_allowed else "Trading is off, so no order can be sent",
     ]
-    positions = mt5.positions_get(symbol=SYMBOL) or []
+    positions = mt5.positions_get() or []
     managed = [p for p in positions if p.magic == MAGIC]
     if not managed:
-        lines.append(f"No open trade on {SYMBOL}")
+        lines.append("No open trade")
     for position in managed:
         lines.append(
-            f"{side_name(position.type)} {position.volume:.0f} lots @ {position.price_open:.2f}"
+            f"{side_name(position.type)} {position.symbol} {lots_text(position.volume)} lots @ {position.price_open:.2f}"
         )
         lines.append(f"Stop {position.sl:.2f}  Target {position.tp:.2f}")
         lines.append(f"Open profit {money(position.profit)}")
@@ -142,9 +147,9 @@ def close_text(result):
 def position_map():
     if not connect():
         return None
-    positions = mt5.positions_get(symbol=SYMBOL) or []
+    positions = mt5.positions_get() or []
     return {
-        p.ticket: (p.type, p.volume, p.price_open, p.sl, p.tp, p.profit)
+        p.ticket: (p.symbol, p.type, p.volume, p.price_open, p.sl, p.tp, p.profit)
         for p in positions
         if p.magic == MAGIC
     }
@@ -155,20 +160,20 @@ def describe_position_changes(previous, current, pending):
     if previous is None or current is None:
         return notes
     for ticket, row in current.items():
-        kind, volume, price, stop, target, profit = row
+        symbol, kind, volume, price, stop, target, profit = row
         if ticket not in previous:
             notes.append(
                 "New signal\n"
-                f"{side_name(kind)} {SYMBOL} NOW AT {price:.2f}\n"
+                f"{side_name(kind)} {symbol} NOW AT {price:.2f}\n"
                 f"TAKE PROFIT AT {target:.2f}\n"
                 f"STOP LOSS AT {stop:.2f}"
             )
             continue
-        old_kind, old_volume, old_price, old_stop, old_target, _old_profit = previous[ticket]
+        _old_symbol, old_kind, old_volume, old_price, old_stop, old_target, _old_profit = previous[ticket]
         if volume < old_volume - 0.01:
             notes.append(
                 f"Partial close\n"
-                f"{old_volume - volume:.0f} lots closed, {volume:.0f} still open\n"
+                f"{lots_text(old_volume - volume)} lots closed, {lots_text(volume)} still open\n"
                 f"Open profit {money(profit)}"
             )
         if abs(stop - old_stop) > 0.05:
