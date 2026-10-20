@@ -423,7 +423,7 @@ public:
          m_shot_open=bar.open;
          m_shot_seen=true;
         }
-      if(m_daily_done || !m_shot_seen || bar_min!=m_cfg.daily_minute)
+      if(m_replay || m_daily_done || !m_shot_seen || bar_min!=m_cfg.daily_minute)
          return ICT_SIGNAL_NONE;
 
       m_daily_done=true;

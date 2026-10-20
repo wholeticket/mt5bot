@@ -1,5 +1,5 @@
 #property copyright "RobustForexEA"
-#property version   "6.20"
+#property version   "6.22"
 #property description "NY-session Nasdaq EA, plus a gold scalp that steps aside for the shots."
 
 #include <RobustForex/Strategy.mqh>
