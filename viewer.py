@@ -1,4 +1,4 @@
-"""Live view of the pass bot on US100.cash. Read only. Sends no orders.
+"""Live view of the pass bot. Nasdaq and gold, side by side. Read only. Sends no orders.
 
 The page listens on this PC, ports 8765 and 18765.
 127.0.0.1 only works in a browser on this PC. From the laptop, open the
@@ -44,147 +44,191 @@ PAGE = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>US100.cash,M5</title>
+<title>Pass bot</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #1c1f22; color: #d7d7d7; font: 12px Tahoma, "Segoe UI", sans-serif; }
+  html, body { margin: 0; height: 100%; background: #1c2024; color: #c0c0c0; font: 12px Tahoma, sans-serif; }
   body { display: flex; flex-direction: column; min-height: 100vh; }
-  header { display: flex; justify-content: space-between; gap: 16px; padding: 6px 10px; background: #2a2e32; border-bottom: 1px solid #111; }
+  header { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 5px 10px; background: #2a2e32; border-bottom: 1px solid #000; color: #fff; }
   header b { color: #fff; font-weight: 600; }
-  .bad { color: #ff5a5a; }
-  .good { color: #4cd07a; }
-  #orderbar { background: #23272b; border-bottom: 1px solid #111; }
-  #ticket { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 8px 10px; }
-  main { flex: 1; min-height: 0; }
-  #chartwrap { position: relative; background: #000; height: 100%; min-height: 420px; }
-  svg { width: 100%; height: 100%; display: block; }
-  #comment { position: absolute; left: 8px; top: 6px; color: #f2f2f2; white-space: pre; line-height: 1.35; text-shadow: 0 1px 2px #000; pointer-events: none; }
-  aside { background: #23272b; border-left: 1px solid #111; display: flex; flex-direction: column; }
-  h2 { margin: 0; padding: 8px 10px; background: #2f3439; color: #fff; font-size: 12px; font-weight: 600; }
-  .ticket { padding: 10px; }
-  .sym { font-size: 16px; color: #fff; margin-bottom: 2px; }
-  .kind { color: #9a9a9a; margin-bottom: 10px; }
-  .buttons { display: grid; grid-template-columns: 110px 110px; gap: 8px; }
-  .btn { border: 1px solid #111; padding: 8px 6px 6px; text-align: center; background: #3a3f44; color: #8d8d8d; }
-  .btn.on-sell { background: #c44747; color: #fff; }
-  .btn.on-buy { background: #3d7ec4; color: #fff; }
-  .btn .px { display: block; font-size: 16px; font-weight: 700; }
-  .btn small { color: inherit; opacity: 0.85; }
-  .field { display: flex; flex-direction: column; gap: 2px; min-width: 90px; }
-  .field span { color: #9a9a9a; }
-  .field b { color: #fff; font-weight: 600; }
-  .status { flex-basis: 100%; line-height: 1.4; }
-  #journal { background: #0d0d0d; border-top: 1px solid #111; padding: 6px 10px 8px; min-height: 92px; }
-  #journal h2 { margin: 0 -10px 6px; }
-  #lines { font: 13px Tahoma, "Segoe UI", sans-serif; }
+  .bad { color: #ff5252; }
+  .good { color: #00c000; }
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: #000; height: 48vh; min-height: 280px; }
+  .chartbox { display: flex; flex-direction: column; min-width: 0; background: #000; }
+  .charthead { display: flex; justify-content: space-between; gap: 8px; padding: 4px 8px; background: #2a2e32; color: #fff; }
+  .charthead .px { color: #fff; }
+  .charthead .px b { font-weight: 600; }
+  .chartwrap { position: relative; flex: 1; min-height: 0; background: #000; }
+  svg { width: 100%; height: 100%; display: block; background: #000; }
+  .corner { position: absolute; left: 8px; top: 6px; color: #fff; white-space: pre; line-height: 1.35; text-shadow: 1px 1px 0 #000; pointer-events: none; }
+  .desk { display: grid; grid-template-columns: 1.35fr 0.65fr; gap: 1px; background: #000; }
+  .panel { background: #000; min-width: 0; }
+  h2 { margin: 0; padding: 6px 10px; background: #2a2e32; color: #fff; font: 600 12px Tahoma, sans-serif; }
+  .think { display: grid; grid-template-columns: 1fr 1fr; }
+  .card { padding: 10px 12px 12px; border-right: 1px solid #222; }
+  .card h3 { margin: 0 0 8px; color: #fff; font: 600 13px Tahoma, sans-serif; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .pill { font: 600 12px Tahoma, sans-serif; }
+  .pill.wait { color: #d0d0d0; }
+  .pill.ready.buy, .side.buy { color: #1e88e5; }
+  .pill.ready.sell, .side.sell { color: #e53935; }
+  .pill.in { color: #fff; }
+  .pill.aside { color: #ffb300; }
+  .pill.off { color: #8a8a8a; }
+  .pill.block { color: #ff5252; }
+  .card p { margin: 0 0 4px; color: #d0d0d0; line-height: 1.45; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; color: #9a9a9a; font-weight: 400; padding: 6px 8px; background: #141414; }
+  td { padding: 7px 8px; border-top: 1px solid #222; color: #e0e0e0; }
+  td.up { color: #00c000; }
+  td.down { color: #ff5252; }
+  .empty { padding: 12px; color: #9a9a9a; }
+  #journal { background: #000; border-top: 1px solid #222; max-height: 132px; overflow: auto; }
+  #lines { padding: 4px 10px 8px; }
   .jrow { display: flex; gap: 14px; padding: 3px 0; }
-  .jrow span { color: #8a8a8a; min-width: 108px; }
-  .jrow b { font-weight: 600; color: #e7e1d4; }
-  .jrow.buy b { color: #8fce7a; }
-  .jrow.reject b { color: #ff5a5a; }
+  .jrow span { color: #8a8a8a; min-width: 52px; }
+  .jrow b { font-weight: 400; color: #d0d0d0; }
+  .jrow.buy b { color: #00c000; }
+  .jrow.reject b { color: #ff5252; }
+  @media (max-width: 980px) {
+    .charts, .think, .desk { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
 <header>
-  <div id="symbol">US100.cash, M5</div>
+  <div id="symbol">Pass bot</div>
   <div id="account"></div>
 </header>
-<section id="orderbar">
-  <div class="ticket" id="ticket"></div>
-</section>
-<main>
-  <div id="chartwrap">
-    <svg id="chart" viewBox="0 0 900 520" preserveAspectRatio="none"></svg>
-    <div id="comment"></div>
+<section class="charts">
+  <div class="chartbox">
+    <div class="charthead" id="head-nas"><span>US100.cash, M5</span></div>
+    <div class="chartwrap">
+      <svg id="chart-nas" viewBox="0 0 640 420" preserveAspectRatio="none"></svg>
+      <div class="corner" id="note-nas"></div>
+    </div>
   </div>
-</main>
+  <div class="chartbox">
+    <div class="charthead" id="head-gold"><span>XAUUSD, M1</span></div>
+    <div class="chartwrap">
+      <svg id="chart-gold" viewBox="0 0 640 420" preserveAspectRatio="none"></svg>
+      <div class="corner" id="note-gold"></div>
+    </div>
+  </div>
+</section>
+<section class="desk">
+  <section class="panel">
+    <h2>Thinking</h2>
+    <div class="think" id="think"></div>
+  </section>
+  <section class="panel">
+    <h2>Trades</h2>
+    <div id="trades"></div>
+  </section>
+</section>
 <section id="journal">
   <h2>Journal</h2>
   <div id="lines"></div>
 </section>
 <script>
 function esc(s) {
-  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;");
+  return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;");
 }
-function field(label, value) {
-  return '<div class="field"><span>' + esc(label) + '</span><b>' + esc(value) + '</b></div>';
-}
-function ticket(data) {
-  const t = data.ticket;
-  const sellOn = t.side === "sell" ? " on-sell" : "";
-  const buyOn = t.side === "buy" ? " on-buy" : "";
-  let html = '<div class="sym">' + esc(t.symbol || "US100.cash") + '</div><div class="kind">' + esc(t.execution) + '</div>';
-  html += '<div class="buttons">';
-  html += '<div class="btn' + sellOn + '"><span>Sell</span><span class="px">' + esc(t.bid) + '</span><small>by market</small></div>';
-  html += '<div class="btn' + buyOn + '"><span>Buy</span><span class="px">' + esc(t.ask) + '</span><small>by market</small></div>';
-  html += '</div>';
-  html += field("Volume", t.volume);
-  html += field("Stop Loss", t.sl);
-  html += field("Take Profit", t.tp);
-  html += field("Comment", t.comment);
-  html += '<div class="status ' + (t.ok ? "good" : "bad") + '">' + esc(t.status) + '</div>';
-  document.getElementById("ticket").innerHTML = html;
-}
-function htag(parts, y, price, color, text, x0, x1) {
-  parts.push('<line x1="'+x0+'" x2="'+x1+'" y1="'+y(price)+'" y2="'+y(price)+'" stroke="'+color+'" stroke-width="1"/>');
+function htag(parts, y, price, color, text, x0, x1, dash) {
   const yy = y(price);
-  parts.push('<rect x="'+(x1+2)+'" y="'+(yy-8)+'" width="70" height="16" fill="'+color+'"/>');
-  parts.push('<text x="'+(x1+37)+'" y="'+(yy+4)+'" fill="#000" font-size="11" text-anchor="middle" font-family="Tahoma">'+text+'</text>');
+  const dashAttr = dash ? ' stroke-dasharray="3 3"' : "";
+  parts.push('<line x1="'+x0+'" x2="'+x1+'" y1="'+yy+'" y2="'+yy+'" stroke="'+color+'" stroke-width="1"'+dashAttr+'/>');
+  const w = Math.max(46, text.length * 7);
+  parts.push('<rect x="'+(x1+2)+'" y="'+(yy-8)+'" width="'+w+'" height="16" fill="'+color+'"/>');
+  parts.push('<text x="'+(x1+2+w/2)+'" y="'+(yy+4)+'" fill="#000" font-size="11" text-anchor="middle" font-family="Tahoma">'+text+'</text>');
 }
-function draw(data) {
-  const bars = data.bars || [];
-  const svg = document.getElementById("chart");
+function draw(id, chart) {
+  const svg = document.getElementById(id);
+  const bars = (chart && chart.bars) || [];
   if (!bars.length) { svg.innerHTML = ""; return; }
-  const left = 8, right = 820, top = 16, bottom = 492;
+  const levels = chart.levels || [];
+  const left = 6, right = 560, top = 14, bottom = 392;
   let lo = Math.min(...bars.map(b => b.l));
   let hi = Math.max(...bars.map(b => b.h));
-  (data.levels || []).forEach(level => {
+  levels.forEach(level => {
     if (level.price) { lo = Math.min(lo, level.price); hi = Math.max(hi, level.price); }
   });
-  const span0 = Math.max(hi - lo, 1);
+  const span0 = Math.max(hi - lo, 0.5);
   lo -= span0 * 0.08;
   hi += span0 * 0.08;
   const span = hi - lo;
   const y = p => top + (hi - p) / span * (bottom - top);
   const cw = (right - left) / bars.length;
   const parts = [];
-  for (let i = 0; i <= 6; i++) {
-    const p = lo + span * i / 6;
+  for (let i = 0; i <= 5; i++) {
+    const p = lo + span * i / 5;
     const yy = y(p);
-    parts.push('<line x1="'+left+'" x2="'+right+'" y1="'+yy+'" y2="'+yy+'" stroke="#2a2a2a"/>');
-    parts.push('<text x="828" y="'+(yy+4)+'" fill="#8a8a8a" font-size="11" font-family="Tahoma">'+p.toFixed(2)+'</text>');
+    parts.push('<line x1="'+left+'" x2="'+right+'" y1="'+yy+'" y2="'+yy+'" stroke="#292929"/>');
+    parts.push('<text x="568" y="'+(yy+4)+'" fill="#808080" font-size="11" font-family="Tahoma">'+p.toFixed(2)+'</text>');
   }
-  for (let i = 0; i < bars.length; i += 12) {
+  const step = Math.max(8, Math.round(bars.length / 5));
+  for (let i = 0; i < bars.length; i += step) {
     const x = left + i * cw;
-    parts.push('<line x1="'+x+'" x2="'+x+'" y1="'+top+'" y2="'+bottom+'" stroke="#2a2a2a"/>');
-    parts.push('<text x="'+x+'" y="508" fill="#8a8a8a" font-size="11" font-family="Tahoma">'+bars[i].t+'</text>');
+    parts.push('<line x1="'+x+'" x2="'+x+'" y1="'+top+'" y2="'+bottom+'" stroke="#292929"/>');
+    parts.push('<text x="'+(x+2)+'" y="412" fill="#808080" font-size="11" font-family="Tahoma">'+bars[i].t+'</text>');
   }
   bars.forEach((b, i) => {
     const x = left + i * cw + cw * 0.5;
     const up = b.c >= b.o;
-    const color = "#f2f2f2";
+    const color = "#ffffff";
     parts.push('<line x1="'+x+'" x2="'+x+'" y1="'+y(b.h)+'" y2="'+y(b.l)+'" stroke="'+color+'" stroke-width="1"/>');
     const topY = y(Math.max(b.o, b.c));
     const botY = y(Math.min(b.o, b.c));
-    const fill = up ? "#000" : "#f2f2f2";
-    parts.push('<rect x="'+(x-cw*0.32)+'" y="'+topY+'" width="'+(cw*0.64)+'" height="'+Math.max(1, botY-topY)+'" fill="'+fill+'" stroke="'+color+'"/>');
+    const fill = up ? "#000000" : "#ffffff";
+    parts.push('<rect x="'+(x-Math.max(1, cw*0.32))+'" y="'+topY+'" width="'+Math.max(1, cw*0.64)+'" height="'+Math.max(1, botY-topY)+'" fill="'+fill+'" stroke="'+color+'"/>');
   });
-  (data.levels || []).forEach(level => {
+  levels.forEach(level => {
     if (!level.price) return;
-    htag(parts, y, level.price, level.color, level.label, left, right);
+    htag(parts, y, level.price, level.color, esc(level.label), left, right, level.dash);
   });
   svg.innerHTML = parts.join("");
 }
-async function tick() {
-  const data = await (await fetch("/api")).json();
-  document.getElementById("symbol").textContent = data.symbol_line;
-  document.getElementById("account").innerHTML = data.account_html;
-  document.getElementById("comment").textContent = data.comment;
-  ticket(data);
-  const lines = document.getElementById("lines");
-  lines.innerHTML = (data.journal || []).map(row => {
-    return '<div class="jrow ' + esc(row.kind || "") + '"><span>' + esc(row.time || "") + '</span><b>' + esc(row.text || "") + '</b></div>';
+function head(id, chart) {
+  const el = document.getElementById(id);
+  if (!chart) { el.innerHTML = ""; return; }
+  el.innerHTML = "<span>" + esc(chart.title) + "</span><span class='px'>Bid <b>" + esc(chart.bid) + "</b>  Ask <b>" + esc(chart.ask) + "</b></span>";
+}
+function render(data) {
+  document.getElementById("symbol").textContent = "Pass bot   " + (data.symbol_line || "");
+  document.getElementById("account").innerHTML = data.account_html || "";
+  const charts = {};
+  (data.charts || []).forEach(chart => { charts[chart.id] = chart; });
+  head("head-nas", charts.nas);
+  head("head-gold", charts.gold);
+  document.getElementById("note-nas").textContent = charts.nas ? (charts.nas.note || "") : "";
+  document.getElementById("note-gold").textContent = charts.gold ? (charts.gold.note || "") : "";
+  draw("chart-nas", charts.nas);
+  draw("chart-gold", charts.gold);
+  document.getElementById("think").innerHTML = (data.thinking || []).map(card => {
+    const lines = (card.lines || []).map(line => "<p>" + esc(line) + "</p>").join("");
+    const side = card.side ? " " + esc(card.side) : "";
+    return "<div class='card'><h3>" + esc(card.market) + "<span class='pill " + esc(card.tone || "off") + side + "'>" + esc(card.state) + "</span></h3>" + lines + "</div>";
   }).join("");
-  draw(data);
+  const trades = data.trades || [];
+  const box = document.getElementById("trades");
+  if (!trades.length) {
+    box.innerHTML = "<div class='empty'>No open trade.</div>";
+  } else {
+    const rows = trades.map(row => {
+      const cls = row.profit > 0 ? "up" : (row.profit < 0 ? "down" : "");
+      return "<tr class='" + esc(row.side) + "'><td>" + esc(row.symbol) + "</td><td class='side " + esc(row.side) + "'>" + esc(row.side === "buy" ? "buy" : "sell") + "</td><td>" + esc(row.volume) + "</td><td>" + esc(row.price) + "</td><td>" + esc(row.sl) + "</td><td>" + esc(row.tp) + "</td><td class='" + cls + "'>" + esc(row.profit_text) + "</td></tr>";
+    }).join("");
+    box.innerHTML = "<table><tr><th>Symbol</th><th>Type</th><th>Volume</th><th>Price</th><th>S / L</th><th>T / P</th><th>Profit</th></tr>" + rows + "</table>";
+  }
+  document.getElementById("lines").innerHTML = (data.journal || []).map(row => {
+    return "<div class='jrow " + esc(row.kind || "") + "'><span>" + esc(row.time || "") + "</span><b>" + esc(row.text || "") + "</b></div>";
+  }).join("");
+}
+async function tick() {
+  try {
+    const data = await (await fetch("/api")).json();
+    render(data);
+  } catch (err) {
+    document.getElementById("symbol").textContent = "Pass bot";
+  }
 }
 tick();
 setInterval(tick, 2000);
@@ -403,165 +447,300 @@ def empty_ticket(bid, ask):
     }
 
 
-def gold_note():
+def chart_bars(symbol, timeframe, count, offset):
+    rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, count)
+    if rates is None:
+        return []
+    bars = []
+    for rate in rates:
+        when = bar_ny(rate["time"], offset)
+        bars.append({
+            "t": when.strftime("%H:%M"),
+            "o": float(rate["open"]),
+            "h": float(rate["high"]),
+            "l": float(rate["low"]),
+            "c": float(rate["close"]),
+        })
+    return bars
+
+
+def level(price, color, label, dash=False):
+    return {"price": float(price), "color": color, "label": label, "dash": dash}
+
+
+def position_levels(position):
+    levels = [level(position.price_open, "#ffffff", f"{float(position.price_open):.2f}")]
+    if position.sl:
+        levels.append(level(position.sl, "#ff3b30", f"{float(position.sl):.2f}"))
+    if position.tp:
+        levels.append(level(position.tp, "#00c000", f"{float(position.tp):.2f}"))
+    return levels
+
+
+def trade_row(position):
+    return {
+        "symbol": position.symbol,
+        "side": "buy" if position.type == mt5.POSITION_TYPE_BUY else "sell",
+        "volume": f"{float(position.volume):.2f}",
+        "price": f"{float(position.price_open):.2f}",
+        "sl": f"{float(position.sl):.2f}" if position.sl else "",
+        "tp": f"{float(position.tp):.2f}" if position.tp else "",
+        "profit": float(position.profit),
+        "profit_text": f"{float(position.profit):,.2f}",
+    }
+
+
+def ohlc_line(bar):
+    if not bar:
+        return ""
+    return f"O {bar['o']:.2f}  H {bar['h']:.2f}  L {bar['l']:.2f}  C {bar['c']:.2f}"
+
+
+def nas_view(now, minutes, bid, ask, bars, trading, position):
+    open930 = None
+    for bar in bars:
+        hour, minute = bar["t"].split(":")
+        if hour == "09" and minute == "30":
+            open930 = bar["o"]
+    move = None if open930 is None else bid - open930
+    shot_day = now.weekday() in (0, 3, 4)
+    order, why = wanted_order(move, minutes, bars, bid, ask, shot_day)
+    levels = []
+    if open930 is not None:
+        levels.append(level(open930, "#ffd700", f"{open930:.2f}"))
+        levels.append(level(open930 + SHOT_POINTS, "#8a8a8a", f"{open930 + SHOT_POINTS:.2f}", True))
+        levels.append(level(open930 - SHOT_POINTS, "#8a8a8a", f"{open930 - SHOT_POINTS:.2f}", True))
+    lines = []
+    if shot_day:
+        lines.append("Shot day. 10:00 fades the move. 11:00 goes with it.")
+    else:
+        lines.append("Not a shot day. One Nasdaq trade at 11:00 New York.")
+    if position is not None:
+        state, tone, side = "In trade", "in", "buy" if position.type == mt5.POSITION_TYPE_BUY else "sell"
+        lines.append(f"{side.title()} {float(position.volume):.2f} at {float(position.price_open):.2f}.")
+        lines.append("Red line is the stop. Green line is the target.")
+        levels = position_levels(position) + [lv for lv in levels if lv["color"] == "#ffd700" or lv["dash"]]
+    elif order is not None:
+        side = order["side"]
+        state = "Ready" if trading else "Blocked"
+        tone = "ready" if trading else "block"
+        lines.append(why)
+        lines.append(f"Stop {order['sl']}  Target {order['tp']}  Risk ${SHOT_RISK if 'am' in order['comment'] or order['comment']=='ORB day' else FALLBACK_RISK:.0f}.")
+        levels.append(level(order["entry_price"], "#ffffff", f"{order['entry_price']:.2f}"))
+        levels.append(level(order["sl_price"], "#ff3b30", order["sl"]))
+        levels.append(level(order["tp_price"], "#00c000", order["tp"]))
+    else:
+        side = ""
+        if minutes > 11 * 60:
+            state, tone = "Done", "off"
+        else:
+            state, tone = "Waiting", "wait"
+        lines.append(why)
+    if move is not None:
+        lines.append(f"Since 09:30: {move:+.1f} points. The shot lines are 60 either side.")
+    else:
+        lines.append("The 09:30 open is not on the chart yet.")
+    if not trading:
+        lines.append("Trading is off on this login. No new order will be sent.")
+    last = bars[-1] if bars else None
+    return {
+        "id": "nas",
+        "title": "US100.cash, M5",
+        "bid": f"{bid:.2f}",
+        "ask": f"{ask:.2f}",
+        "bars": bars[-60:],
+        "levels": levels,
+        "note": "US100.cash,M5\n" + ohlc_line(last),
+        "thinking": {"market": "Nasdaq", "state": state, "tone": tone, "side": side, "lines": lines},
+    }
+
+
+def gold_view(now, minutes, trading, nasdaq_open, position):
+    lines = []
+    levels = []
+    side = ""
+    state, tone = "Off", "off"
+    bid = ask = None
+    bars = []
     if not mt5.symbol_select(GOLD, True):
-        return "Gold is not on this account."
-    tick = mt5.symbol_info_tick(GOLD)
-    rates = mt5.copy_rates_from_pos(GOLD, mt5.TIMEFRAME_M1, 1, 3)
-    positions = [p for p in (mt5.positions_get(symbol=GOLD) or []) if p.magic == MAGIC]
-    if positions:
-        position = positions[0]
-        side = "Buy" if position.type == mt5.POSITION_TYPE_BUY else "Sell"
-        return (
-            f"Gold {side} {float(position.volume):.2f} at {float(position.price_open):.2f}. "
-            f"Stop {float(position.sl):.2f}. Target {float(position.tp):.2f}."
-        )
-    nasdaq = [p for p in (mt5.positions_get(symbol=SYMBOL) or []) if p.magic == MAGIC]
-    if nasdaq:
-        return "Gold is waiting. Nasdaq has the account."
+        lines.append("XAUUSD is not on this account.")
+    else:
+        tick = mt5.symbol_info_tick(GOLD)
+        if tick is not None:
+            bid = float(tick.bid)
+            ask = float(tick.ask)
+            offset = server_offset_hours(tick.time)
+            bars = chart_bars(GOLD, mt5.TIMEFRAME_M1, 80, offset)
+        closed = mt5.copy_rates_from_pos(GOLD, mt5.TIMEFRAME_M1, 1, 3)
+        if position is not None:
+            state, tone = "In trade", "in"
+            side = "buy" if position.type == mt5.POSITION_TYPE_BUY else "sell"
+            lines.append(f"{side.title()} {float(position.volume):.2f} from {float(position.price_open):.2f}.")
+            lines.append("It stands down at 16:00 New York, or sooner if a Nasdaq shot needs the account.")
+            levels = position_levels(position)
+        elif nasdaq_open:
+            state, tone = "Aside", "aside"
+            lines.append("Nasdaq has the account. Gold waits until that trade is flat.")
+        elif now.weekday() >= 5:
+            lines.append("Gold is off for the weekend.")
+        elif minutes < 3 * 60 or minutes >= 16 * 60:
+            state, tone = "Off", "off"
+            lines.append("Gold trades from 03:00 to 16:00 New York.")
+        elif (now.weekday() in (0, 3, 4) and 9 * 60 + 50 <= minutes <= 11 * 60):
+            state, tone = "Aside", "aside"
+            lines.append("Standing aside so the Nasdaq shots go first.")
+        elif now.weekday() not in (0, 3, 4) and 10 * 60 + 50 <= minutes <= 11 * 60:
+            state, tone = "Aside", "aside"
+            lines.append("Standing aside for the 11:00 Nasdaq trade.")
+        elif tick is None or closed is None or len(closed) < 3:
+            state, tone = "Waiting", "wait"
+            lines.append("Gold prices are not in yet.")
+        else:
+            net = float(closed[-1]["close"]) - float(closed[0]["open"])
+            spread = ask - bid
+            lines.append(f"Last 3 minutes {net:+.2f}. It needs {GOLD_MIN:.2f}. Spread {spread:.2f}.")
+            if spread > 0.60:
+                state, tone = "Blocked", "block"
+                lines.append("The spread is too wide to take the bite.")
+            elif abs(net) < GOLD_MIN:
+                state, tone = "Watching", "wait"
+            else:
+                buy = net > 0
+                window = list(closed)
+                if buy:
+                    pullback = max(float(bar["high"]) for bar in window) - float(window[-1]["close"])
+                else:
+                    pullback = float(window[-1]["close"]) - min(float(bar["low"]) for bar in window)
+                if pullback > abs(net) * 0.5:
+                    state, tone = "Watching", "wait"
+                    lines.append("The move gave back half. Waiting for the next push.")
+                else:
+                    side = "buy" if buy else "sell"
+                    state = "Ready" if trading else "Blocked"
+                    tone = "ready" if trading else "block"
+                    entry = ask if buy else bid
+                    bite = min(2.50, max(0.90, abs(net) * 0.50))
+                    stop = min(1.60, max(0.80, pullback + 0.30))
+                    sl = entry - stop if buy else entry + stop
+                    tp = entry + bite if buy else entry - bite
+                    lines.append(f"Wants to {side}. Risk ${GOLD_RISK:.0f}.")
+                    levels = [
+                        level(entry, "#ffffff", f"{entry:.2f}"),
+                        level(sl, "#ff3b30", f"{sl:.2f}"),
+                        level(tp, "#00c000", f"{tp:.2f}"),
+                    ]
+    if not trading and state not in ("In trade",):
+        lines.append("Trading is off on this login.")
+        if state == "Ready":
+            state, tone = "Blocked", "block"
+    last = bars[-1] if bars else None
+    return {
+        "id": "gold",
+        "title": "XAUUSD, M1",
+        "bid": f"{bid:.2f}" if bid is not None else "-",
+        "ask": f"{ask:.2f}" if ask is not None else "-",
+        "bars": bars[-70:],
+        "levels": levels,
+        "note": "XAUUSD,M1\n" + ohlc_line(last),
+        "thinking": {"market": "Gold", "state": state, "tone": tone, "side": side, "lines": lines},
+    }
+
+
+def blank_snapshot(message):
+    empty = {
+        "bars": [],
+        "levels": [],
+        "bid": "-",
+        "ask": "-",
+        "note": message,
+    }
+    return {
+        "symbol_line": "",
+        "account_html": esc_text(message),
+        "charts": [
+            {"id": "nas", "title": "US100.cash, M5", **empty},
+            {"id": "gold", "title": "XAUUSD, M1", **empty},
+        ],
+        "thinking": [
+            {"market": "Nasdaq", "state": "Off", "tone": "off", "side": "", "lines": [message]},
+            {"market": "Gold", "state": "Off", "tone": "off", "side": "", "lines": [message]},
+        ],
+        "trades": [],
+        "journal": journal_lines(),
+    }
+
+
+def snapshot_now():
+    if mt5.terminal_info() is None and not mt5.initialize(timeout=1500):
+        return blank_snapshot("MetaTrader is waiting for the login")
+    tick = mt5.symbol_info_tick(SYMBOL)
+    info = mt5.account_info()
+    if tick is None:
+        return blank_snapshot("No US100.cash prices yet")
+    offset = server_offset_hours(tick.time)
     now = ny_now()
     minutes = now.hour * 60 + now.minute
-    if now.weekday() >= 5:
-        return "Gold is off for the weekend."
-    if minutes < 3 * 60 or minutes >= 16 * 60:
-        return "Gold watches from 03:00 to 16:00 New York."
-    shot_day = now.weekday() in (0, 3, 4)
-    if shot_day and 9 * 60 + 50 <= minutes <= 11 * 60:
-        return "Gold is standing aside so the Nasdaq shots go first."
-    if not shot_day and 10 * 60 + 50 <= minutes <= 11 * 60:
-        return "Gold is standing aside for the 11:00 Nasdaq trade."
-    if tick is None or rates is None or len(rates) < 3:
-        return "Gold prices are not in yet."
-    net = float(rates[-1]["close"]) - float(rates[0]["open"])
-    spread = float(tick.ask) - float(tick.bid)
-    if spread > 0.60:
-        return f"Gold spread is {spread:.2f}. That is too wide."
-    if abs(net) < GOLD_MIN:
-        return f"Gold is watching. The last 3 minutes moved {net:+.2f}. It needs {GOLD_MIN:.2f}."
-    buy = net > 0
-    window = list(rates)
-    if buy:
-        pullback = max(float(bar["high"]) for bar in window) - float(window[-1]["close"])
+    bid = float(tick.bid)
+    ask = float(tick.ask)
+    bars = chart_bars(SYMBOL, mt5.TIMEFRAME_M5, 160, offset)
+    nas_positions = [p for p in (mt5.positions_get(symbol=SYMBOL) or []) if p.magic == MAGIC]
+    gold_positions = [p for p in (mt5.positions_get(symbol=GOLD) or []) if p.magic == MAGIC]
+    trading = bool(info.trade_allowed) if info is not None else False
+    nas = nas_view(now, minutes, bid, ask, bars, trading, nas_positions[0] if nas_positions else None)
+    gold = gold_view(now, minutes, trading, bool(nas_positions), gold_positions[0] if gold_positions else None)
+    balance = float(info.balance) if info is not None else 0.0
+    if info is None:
+        account = "MetaTrader is not connected"
     else:
-        pullback = float(window[-1]["close"]) - min(float(bar["low"]) for bar in window)
-    if pullback > abs(net) * 0.5:
-        return f"Gold moved {net:+.2f}, then gave back half. Waiting for the next push."
-    word = "buy" if buy else "sell"
-    return f"Gold wants to {word}. The last 3 minutes moved {net:+.2f}. Risk ${GOLD_RISK:.0f}."
+        flag = "trading disabled" if not trading else "trading enabled"
+        account = (
+            f"Balance <b>{balance:,.2f}</b> USD  {esc_text(info.name)}  "
+            f"<span class=\"{'bad' if not trading else 'good'}\">{flag}</span>"
+        )
+    trades = [trade_row(p) for p in nas_positions + gold_positions]
+    return {
+        "symbol_line": f"New York {now.strftime('%H:%M:%S')}",
+        "account_html": account,
+        "charts": [
+            {key: nas[key] for key in ("id", "title", "bid", "ask", "bars", "levels", "note")},
+            {key: gold[key] for key in ("id", "title", "bid", "ask", "bars", "levels", "note")},
+        ],
+        "thinking": [nas["thinking"], gold["thinking"]],
+        "trades": trades,
+        "journal": journal_lines(),
+    }
+
+
+_snapshot_lock = threading.Lock()
+_snapshot_busy = False
 
 
 def snapshot():
-    blank = {
-        "symbol_line": "US100.cash, M5",
-        "account_html": "MetaTrader is not connected",
-        "comment": "MetaTrader is not connected",
-        "ticket": empty_ticket(0, 0),
-        "journal": journal_lines(),
-        "bars": [],
-        "levels": [],
-    }
-    if mt5.terminal_info() is None and not mt5.initialize():
-        return blank
-    tick = mt5.symbol_info_tick(SYMBOL)
-    info = mt5.account_info()
-    rates = mt5.copy_rates_from_pos(SYMBOL, mt5.TIMEFRAME_M5, 0, 80)
-    if tick is None or rates is None:
-        blank["comment"] = "No US100.cash prices yet."
-        return blank
+    global _snapshot_busy
+    with _snapshot_lock:
+        if _snapshot_busy:
+            return blank_snapshot("MetaTrader is waiting for the login")
+        _snapshot_busy = True
+    box = {}
 
-    offset = server_offset_hours(tick.time)
-    now = ny_now()
-    bid = float(tick.bid)
-    ask = float(tick.ask)
-    bars = []
-    open930 = None
-    for rate in rates:
-        when = bar_ny(rate["time"], offset)
-        bars.append({"t": when.strftime("%H:%M"), "o": float(rate["open"]), "h": float(rate["high"]),
-                     "l": float(rate["low"]), "c": float(rate["close"])})
-        if when.hour == 9 and when.minute == 30 and when.date() == now.date():
-            open930 = float(rate["open"])
-    move = None if open930 is None else bid - open930
-    minutes = now.hour * 60 + now.minute
-    last = bars[-1]
-    positions = [p for p in (mt5.positions_get(symbol=SYMBOL) or []) if p.magic == MAGIC]
-    gold_positions = [p for p in (mt5.positions_get(symbol=GOLD) or []) if p.magic == MAGIC]
-    trading = bool(info.trade_allowed) if info is not None else False
-    balance = float(info.balance) if info is not None else 0.0
+    def run():
+        global _snapshot_busy
+        try:
+            box["value"] = snapshot_now()
+        except Exception:
+            box["error"] = True
+        finally:
+            with _snapshot_lock:
+                _snapshot_busy = False
 
-    levels = []
-    if open930:
-        levels.append({"price": open930, "color": "#c8b56a", "label": f"{open930:.2f}"})
-    if positions:
-        ticket = position_ticket(positions[0], bid, ask)
-        ticket["execution"] = "Position"
-        ticket["ok"] = True
-        money = ticket.pop("profit")
-        ticket["status"] = f"In the trade. Profit ${money:,.0f}."
-        if ticket["entry_price"]:
-            levels.append({"price": ticket["entry_price"], "color": "#d0d0d0", "label": f"{ticket['entry_price']:.2f}"})
-        if ticket["sl_price"]:
-            levels.append({"price": ticket["sl_price"], "color": "#e24b4b", "label": ticket["sl"]})
-        if ticket["tp_price"]:
-            levels.append({"price": ticket["tp_price"], "color": "#3dbb6a", "label": ticket["tp"]})
-        why = "The position is open. S/L is the red line. T/P is the green line."
-    elif gold_positions:
-        gold_tick = mt5.symbol_info_tick(GOLD)
-        gold_bid = float(gold_tick.bid) if gold_tick else 0.0
-        gold_ask = float(gold_tick.ask) if gold_tick else 0.0
-        ticket = position_ticket(gold_positions[0], gold_bid, gold_ask)
-        ticket["execution"] = "Position"
-        ticket["ok"] = True
-        money = ticket.pop("profit")
-        ticket["status"] = f"Gold is open. Profit ${money:,.0f}."
-        why = "Gold hop is open. The Nasdaq chart stays up. Gold prices are on the ticket."
-    else:
-        shot_day = now.weekday() in (0, 3, 4)
-        order, why = wanted_order(move, minutes, bars, bid, ask, shot_day)
-        if order is None:
-            ticket = empty_ticket(bid, ask)
-            ticket["status"] = why
-            ticket["ok"] = True
-        else:
-            ticket = order
-            ticket["bid"] = f"{bid:.2f}"
-            ticket["ask"] = f"{ask:.2f}"
-            ticket["execution"] = "Market Execution"
-            levels.append({"price": ticket["entry_price"], "color": "#d0d0d0", "label": f"{ticket['entry_price']:.2f}"})
-            levels.append({"price": ticket["sl_price"], "color": "#e24b4b", "label": ticket["sl"]})
-            levels.append({"price": ticket["tp_price"], "color": "#3dbb6a", "label": ticket["tp"]})
-            if not trading:
-                ticket["ok"] = False
-                ticket["status"] = "Trade disabled. This order will be rejected."
-            else:
-                ticket["ok"] = True
-                ticket["status"] = "This is the order the bot will send."
-
-    if not trading:
-        why = why + "\nTrading is off on this login. A new order will be rejected until it is turned back on."
-
-    comment = "\n".join([
-        f"US100.cash,M5",
-        f"O {last['o']:.2f}  H {last['h']:.2f}  L {last['l']:.2f}  C {last['c']:.2f}",
-        "",
-        "PASS BOT",
-        why,
-        "",
-        gold_note(),
-    ])
-    account = ""
-    if info is not None:
-        flag = "trading disabled" if not trading else "trading enabled"
-        account = f"Balance <b>{balance:,.2f}</b> USD  {esc_text(info.name)}  <span class=\"{'bad' if not trading else 'good'}\">{flag}</span>"
-    return {
-        "symbol_line": f"US100.cash, M5   New York {now.strftime('%H:%M:%S')}",
-        "account_html": account,
-        "comment": comment,
-        "ticket": ticket,
-        "journal": journal_lines(),
-        "bars": bars[-48:],
-        "levels": levels,
-    }
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(2.0)
+    if thread.is_alive():
+        return blank_snapshot("MetaTrader is waiting for the login")
+    if box.get("error"):
+        return blank_snapshot("MetaTrader is not connected")
+    return box.get("value") or blank_snapshot("MetaTrader is not connected")
 
 
 def esc_text(value):
