@@ -1,5 +1,5 @@
 #property copyright "RobustForexEA"
-#property version   "6.18"
+#property version   "6.19"
 #property description "NY-session Nasdaq EA, plus a gold scalp that steps aside for the shots."
 
 #include <RobustForex/Strategy.mqh>
@@ -541,7 +541,7 @@ int OnInit(void)
                (int)RideEnabled(),InpRideMinMove,InpRideRiskMoney);
    if(InpGoldMoves)
       SymbolSelect(InpGoldSymbol,true);
-   PrintFormat("EA|event=gold|enabled=%d|symbol=%s|min_move=%.2f|risk=%.0f|max=%d",
+   PrintFormat("EA|event=gold|enabled=%d|symbol=%s|min_move=%.2f|risk=%.0f|max=%d|intact=1",
                (int)InpGoldMoves,InpGoldSymbol,InpGoldMinMove,InpGoldRiskMoney,InpGoldMaxPerDay);
    return INIT_SUCCEEDED;
   }
@@ -795,8 +795,10 @@ bool SubmitGold(const ENUM_ICT_SIGNAL signal,const double stop_distance,const do
    return g_trades.Open(InpGoldSymbol,signal,volume,stop,target,"Gold hop");
   }
 
-// Last three closed minutes of gold. The move has to already be there.
-// Nasdaq shots keep the account when their bars are due.
+// Last three closed minutes of gold. The move has to already be there,
+// the newest of those minutes has to still be going the same way, and
+// price must not have given back half. A move that has stalled is left
+// alone. This only skips weaker entries. Nasdaq still goes first.
 bool TryGold(void)
   {
    if(!InpGoldMoves || InpGoldMinMove<=0.0 || StringLen(InpGoldSymbol)==0)
@@ -846,6 +848,10 @@ bool TryGold(void)
       pullback=rates[0].close-extreme;
      }
    if(pullback>MathAbs(net)*0.5)
+      return false;
+
+   double last_minute=rates[0].close-rates[0].open;
+   if((buy && last_minute<=0.0) || (!buy && last_minute>=0.0))
       return false;
 
    MqlTick tick;
@@ -926,7 +932,7 @@ void ShowBotLabel(void)
    if(RideEnabled())
       structure+="\nafter 11:00, hop on a move already going and take a small bite";
    if(InpGoldMoves)
-      structure+="\nGold buys or sells a move already going, and stands aside for the Nasdaq shots";
+      structure+="\nGold joins only while the move is still going, and stands aside for the Nasdaq shots";
    if(InpDayShots && !InpOrbMorningFade)
      {
       Comment(BotLabel()+"\n"+risk+"\n"+

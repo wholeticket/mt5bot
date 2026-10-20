@@ -947,22 +947,27 @@ def gold_idea(now, minutes, trading, nasdaq_open, position, bid, ask, closed):
             ["It needs the last three closed minutes."],
         )
     net = float(closed[-1]["close"]) - float(closed[0]["open"])
+    last = float(closed[-1]["close"]) - float(closed[-1]["open"])
     spread = ask - bid
     short = max(0.0, GOLD_MIN - abs(net))
+    way = "up" if net > 0 else "down" if net < 0 else "flat"
+    last_way = "up" if last > 0 else "down" if last < 0 else "flat"
+    same_way = (net > 0 and last > 0) or (net < 0 and last < 0)
     facts = [
         {"label": "Bid", "value": price_text(bid)},
         {"label": "Last 3 min", "value": f"{net:+.2f}"},
-        {"label": "Short of 1.20", "value": f"{short:.2f}"},
+        {"label": "Last minute", "value": f"{last:+.2f}"},
         {"label": "Spread", "value": f"{spread:.2f}"},
     ]
-    lines = [f"It needs a {GOLD_MIN:.2f} move over the last three minutes. Spread limit 0.60. Risk ${GOLD_RISK:.0f}. Today {used} of 2."]
+    lines = [f"It needs {GOLD_MIN:.2f} over three minutes, with the last minute still going that way. Spread limit 0.60. Risk ${GOLD_RISK:.0f}. Today {used} of 2."]
     if spread > 0.60:
         lines.append(f"The spread is {spread:.2f}, wider than 0.60, so it will not bite.")
         return idea("gold", "Gold scalp", "Watching", "", f"Last 3 minutes {net:+.2f}. The spread is too wide.", facts, lines)
     if abs(net) < GOLD_MIN * 0.67:
         return idea("gold", "Gold scalp", "Watching", "", f"Last 3 minutes {net:+.2f}. It is {short:.2f} short of {GOLD_MIN:.2f}.", facts, lines)
     if abs(net) < GOLD_MIN:
-        return idea("gold", "Gold scalp", "Getting close", "", f"Last 3 minutes {net:+.2f}. It is {short:.2f} short of {GOLD_MIN:.2f}.", facts, lines)
+        extra = "" if same_way else f" The last minute is {last_way}."
+        return idea("gold", "Gold scalp", "Getting close", "", f"Last 3 minutes {net:+.2f}. It is {short:.2f} short of {GOLD_MIN:.2f}.{extra}", facts, lines)
     buy = net > 0
     window = list(closed)
     if buy:
@@ -970,18 +975,21 @@ def gold_idea(now, minutes, trading, nasdaq_open, position, bid, ask, closed):
     else:
         pullback = float(window[-1]["close"]) - min(float(bar["low"]) for bar in window)
     if pullback > abs(net) * 0.5:
-        lines.append("The move gave back half. Waiting for the next push.")
-        return idea("gold", "Gold scalp", "Watching", "", f"Last 3 minutes {net:+.2f}, but half of it has been given back.", facts, lines)
+        lines.append("Half of that three-minute move has been given back.")
+        return idea("gold", "Gold scalp", "Watching", "", f"Last 3 minutes moved {abs(net):.2f} {way}, but half of it has been given back.", facts, lines)
+    if not same_way:
+        lines.append("The last minute is not still going that way, so this push is left alone.")
+        return idea("gold", "Gold scalp", "Watching", "", f"Last 3 minutes moved {abs(net):.2f} {way}, but the last minute is {last_way}.", facts, lines)
     bite = min(2.50, max(0.90, abs(net) * 0.50))
     stop = min(1.60, max(0.80, pullback + 0.30))
     if bite < stop or bite < spread * 2:
         lines.append("The target is too close for the stop and the spread.")
-        return idea("gold", "Gold scalp", "Watching", "", f"Last 3 minutes {net:+.2f}. The bite is too small.", facts, lines)
+        return idea("gold", "Gold scalp", "Watching", "", f"Last 3 minutes moved {abs(net):.2f} {way}. The bite is too small.", facts, lines)
     side = "buy" if buy else "sell"
-    lines.append(f"Wants to {side}. Risk ${GOLD_RISK:.0f}.")
+    lines.append(f"The last minute is still {last_way}. Risk ${GOLD_RISK:.0f}.")
     if not trading:
         lines.append("Trading is off on this login, so no order will be sent.")
-    return idea("gold", "Gold scalp", "Ready", side, f"Ready to {side} the gold move.", facts, lines)
+    return idea("gold", "Gold scalp", "Ready", side, f"Ready to {side}. The move is {abs(net):.2f} {way} and the last minute is still {last_way}.", facts, lines)
 
 
 def nas_view(now, minutes, bid, ask, bars, trading, position):
@@ -1088,6 +1096,8 @@ def gold_view(now, minutes, trading, nasdaq_open, position):
             net = float(closed[-1]["close"]) - float(closed[0]["open"])
             spread = ask - bid
             lines.append(f"Last 3 minutes {net:+.2f}. It needs {GOLD_MIN:.2f}. Spread {spread:.2f}.")
+            last = float(closed[-1]["close"]) - float(closed[-1]["open"])
+            same_way = (net > 0 and last > 0) or (net < 0 and last < 0)
             if spread > 0.60:
                 state, tone = "Blocked", "block"
                 lines.append("The spread is too wide to take the bite.")
@@ -1102,7 +1112,10 @@ def gold_view(now, minutes, trading, nasdaq_open, position):
                     pullback = float(window[-1]["close"]) - min(float(bar["low"]) for bar in window)
                 if pullback > abs(net) * 0.5:
                     state, tone = "Watching", "wait"
-                    lines.append("The move gave back half. Waiting for the next push.")
+                    lines.append("Half of that move has been given back.")
+                elif not same_way:
+                    state, tone = "Watching", "wait"
+                    lines.append("The last minute is not still going that way.")
                 else:
                     side = "buy" if buy else "sell"
                     state = "Ready" if trading else "Blocked"
