@@ -71,6 +71,10 @@ private:
    bool        m_fade10_done;
    bool        m_with11_done;
    bool        m_daily_done;
+   double      m_drive_high;
+   double      m_drive_low;
+   bool        m_drive_seen;
+   bool        m_replay;
 
    void ResetDay(const int day)
      {
@@ -94,6 +98,9 @@ private:
       m_fade10_done=false;
       m_with11_done=false;
       m_daily_done=false;
+      m_drive_high=0.0;
+      m_drive_low=0.0;
+      m_drive_seen=false;
      }
 
    void Remember(const MqlRates &bar,double &high,double &low,double &open_price,
@@ -229,6 +236,9 @@ private:
      }
 
 public:
+   void SetReplay(const bool replay) { m_replay=replay; }
+   void MarkDailyDone(void)          { m_daily_done=true; }
+
    void ShotState(double &open_price,bool &seen,bool &fade_done,bool &with_done,bool &daily_done) const
      {
       open_price=m_shot_open;
@@ -245,6 +255,9 @@ public:
       m_pm_done=false;
       m_am_bars=0;
       m_pm_bars=0;
+      m_replay=false;
+      m_drive_seen=false;
+      m_daily_done=false;
      }
 
    void Configure(const OrbSettings &settings)
@@ -349,6 +362,56 @@ public:
       return (buy ? ICT_SIGNAL_BUY : ICT_SIGNAL_SELL);
      }
 
+   // On days without the clock shots, the same 11:00 trade can go early.
+   // After the 09:30 open, a closed 5-minute bar that is already 60 points
+   // away, and has not given back half of that distance, is taken in the
+   // direction of the move. That fill replaces 11:00. It is not a second
+   // trade, and it does not run all day. Replay only remembers the open.
+   ENUM_ICT_SIGNAL EarlyWithMove(const MqlRates &bar,const int bar_min,
+                                 double &stop_distance,double &target)
+     {
+      int open_min=9*60+30;
+      if(bar_min==open_min)
+        {
+         m_shot_open=bar.open;
+         m_shot_seen=true;
+         m_drive_high=bar.high;
+         m_drive_low=bar.low;
+         m_drive_seen=true;
+        }
+      else if(m_shot_seen && bar_min>open_min && bar_min<m_cfg.daily_minute)
+        {
+         if(!m_drive_seen)
+           {
+            m_drive_high=bar.high;
+            m_drive_low=bar.low;
+            m_drive_seen=true;
+           }
+         else
+           {
+            m_drive_high=MathMax(m_drive_high,bar.high);
+            m_drive_low=MathMin(m_drive_low,bar.low);
+           }
+        }
+      if(m_replay || m_daily_done || !m_shot_seen)
+         return ICT_SIGNAL_NONE;
+      if(bar_min<open_min || bar_min>=m_cfg.daily_minute)
+         return ICT_SIGNAL_NONE;
+
+      double move=bar.close-m_shot_open;
+      if(MathAbs(move)<m_cfg.day_move)
+         return ICT_SIGNAL_NONE;
+      double pullback=(move>0.0 ? m_drive_high-bar.close : bar.close-m_drive_low);
+      if(pullback>MathAbs(move)*0.5)
+         return ICT_SIGNAL_NONE;
+
+      m_daily_done=true;
+      bool buy=(m_cfg.daily_dir>=0 ? move>0.0 : move<0.0);
+      stop_distance=m_cfg.daily_stop;
+      target=bar.close+(buy ? m_cfg.daily_target : -m_cfg.daily_target);
+      return (buy ? ICT_SIGNAL_BUY : ICT_SIGNAL_SELL);
+     }
+
    // One trade on the 11:00 bar, in the direction of the move since 09:30.
    // A flat morning is left alone. This does not replace the 60-point shots.
    ENUM_ICT_SIGNAL DailyOnce(const MqlRates &bar,const int bar_min,
@@ -450,6 +513,16 @@ public:
                out.signal=shot;
                out.session="day";
                return shot;
+              }
+           }
+         if(m_cfg.daily_on && !shot_day)
+           {
+            ENUM_ICT_SIGNAL early=EarlyWithMove(bar,bar_min,out.stop_distance,out.target);
+            if(early!=ICT_SIGNAL_NONE)
+              {
+               out.signal=early;
+               out.session="daily";
+               return early;
               }
            }
          if(m_cfg.daily_on)

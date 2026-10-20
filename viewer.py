@@ -765,6 +765,26 @@ def shots_idea(now, minutes, bid, bars, position, trading):
     return idea("shots", "Nasdaq shots", state, side, lead, facts, lines)
 
 
+def morning_pullback(bars, move, price):
+    seen = False
+    extreme = None
+    buy = move > 0
+    for bar in bars:
+        if bar["t"] == "09:30":
+            seen = True
+        if not seen:
+            continue
+        if extreme is None:
+            extreme = bar["h"] if buy else bar["l"]
+        else:
+            extreme = max(extreme, bar["h"]) if buy else min(extreme, bar["l"])
+    if extreme is None:
+        return None
+    if buy:
+        return max(extreme, price) - price
+    return price - min(extreme, price)
+
+
 def fallback_idea(now, minutes, bid, bars, position, trading):
     opened = open_930(bars)
     move = None if opened is None else bid - opened
@@ -775,7 +795,7 @@ def fallback_idea(now, minutes, bid, bars, position, trading):
             "fallback", "11:00 fallback", "In a trade", side,
             f"{word} {float(position.volume):.2f} lots from {price_text(float(position.price_open))}.",
             facts,
-            ["Stop 30. Target 120. This is the one Nasdaq trade."],
+            ["This is the one Nasdaq trade. Stop 30, target 120." if minutes >= 11 * 60 else "This was the earlier entry, so 11:00 will not be taken as well."],
         )
     if now.weekday() >= 5:
         return idea(
@@ -808,6 +828,50 @@ def fallback_idea(now, minutes, bid, bars, position, trading):
             ],
             ["The 60 point shot goes first. This smaller trade is the backup."],
         )
+    if not shot_day(now) and minutes < 11 * 60:
+        pullback = None if move is None else morning_pullback(bars, move, bid)
+        given_back = pullback is not None and move is not None and abs(move) > 0 and pullback > abs(move) * 0.5
+        bar_left = f"{(5 - (now.minute % 5)) * 60 - now.second} sec" if now.minute % 5 != 0 or now.second != 0 else "now"
+        facts = [
+            {"label": "Bid", "value": price_text(bid)},
+            {"label": "From the open", "value": "—" if move is None else f"{move:+.1f}"},
+            {"label": "Earlier needs", "value": "60 points"},
+            {"label": "11:00 in", "value": clock_left(now, 11 * 60)},
+        ]
+        if move is None:
+            return idea(
+                "fallback", "11:00 fallback", "Watching", "",
+                "Waiting for the 09:30 open. The 11:00 trade stays unless an earlier entry is already there.",
+                facts,
+                ["After the open, a 60 point move that has not given back half is taken when that 5-minute bar closes. Otherwise it still waits for 11:00."],
+            )
+        if abs(move) >= SHOT_POINTS and not given_back:
+            side = "buy" if move > 0 else "sell"
+            way = "above" if move > 0 else "below"
+            lines = ["This replaces the 11:00 trade. Same stop 30, target 120, and $250 risk. It sends when this 5-minute bar closes."]
+            facts[3] = {"label": "Bar closes", "value": bar_left}
+            if not trading:
+                lines.append("Trading is off on this login, so no order will be sent.")
+            return idea(
+                "fallback", "11:00 fallback", "Ready", side,
+                f"Taking the earlier entry. Price is {abs(move):.1f} points {way} the open, and half of that move has not been given back.",
+                facts, lines,
+            )
+        if given_back:
+            return idea(
+                "fallback", "11:00 fallback", "Watching", "",
+                f"Waiting for 11:00. Price is {abs(move):.1f} points from the open, but half of that move has been given back.",
+                facts,
+                ["The earlier entry stays off. The 11:00 trade is unchanged."],
+            )
+        short = max(0.0, SHOT_POINTS - abs(move))
+        state = "Getting close" if abs(move) >= SHOT_POINTS * 0.67 else "Watching"
+        return idea(
+            "fallback", "11:00 fallback", state, "",
+            f"Waiting for 11:00. Price is {abs(move):.1f} points from the open, {short:.1f} short of the earlier entry.",
+            facts,
+            ["The earlier entry needs 60 points from the 09:30 open without giving half back. If that does not happen, the 11:00 trade still runs."],
+        )
     if minutes >= 11 * 60 + 5:
         return idea(
             "fallback", "11:00 fallback", "Passed", "",
@@ -832,7 +896,7 @@ def fallback_idea(now, minutes, bid, bars, position, trading):
     else:
         state, side = "Watching", ""
         lead = "Waiting for the 09:30 New York open." if move is None else move_words(move, 0.5)
-    lines = ["One Nasdaq trade at 11:00, with the morning. Stop 30, target 120, risk $250."]
+    lines = ["The earlier entry did not fire. This is the 11:00 trade, with the morning. Stop 30, target 120, risk $250."]
     if state == "Ready" and not trading:
         lines.append("Trading is off on this login, so no order will be sent.")
     return idea(

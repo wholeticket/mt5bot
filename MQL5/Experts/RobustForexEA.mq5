@@ -1,5 +1,5 @@
 #property copyright "RobustForexEA"
-#property version   "6.19"
+#property version   "6.20"
 #property description "NY-session Nasdaq EA, plus a gold scalp that steps aside for the shots."
 
 #include <RobustForex/Strategy.mqh>
@@ -531,7 +531,7 @@ int OnInit(void)
    PrintFormat("EA|event=initialized|bot=%s|symbol=%s|entry=%s|structure=%s|bias=%s|magic=%I64u",
                BotLabel(),_Symbol,EnumToString(InpEntryTimeframe),EnumToString(InpStructureTimeframe),
                EnumToString(InpBiasTimeframe),InpMagicNumber);
-   PrintFormat("EA|event=book|daily=%d|daily_stop=%.0f|daily_target=%.0f|shots=%d|weekdays=%d|stop=%.0f|target=%.0f|risk=%.0f",
+   PrintFormat("EA|event=book|daily=%d|daily_stop=%.0f|daily_target=%.0f|shots=%d|weekdays=%d|stop=%.0f|target=%.0f|risk=%.0f|early=1",
                (int)orb.daily_on,orb.daily_stop,orb.daily_target,(int)orb.day_shots,orb.weekdays,
                orb.fixed_stop,orb.day_target,InpFixedRiskMoney);
    PrintFormat("EA|event=structure|enabled=%d|continuation=%d|inverse=%d",
@@ -551,11 +551,15 @@ int OnInit(void)
 // not taken a second time.
 void ReplayOpeningRange(void)
   {
+   g_orb.SetReplay(true);
    MqlRates bars[];
    ArraySetAsSeries(bars,false);
    int copied=CopyRates(_Symbol,PERIOD_M5,1,200,bars);
    if(copied<=0)
+     {
+      g_orb.SetReplay(false);
       return;
+     }
    bool newest_first=(copied>1 && bars[0].time>bars[copied-1].time);
    int opens=0;
    for(int n=0;n<copied;n++)
@@ -568,10 +572,16 @@ void ReplayOpeningRange(void)
       OrbSignal orb;
       g_orb.Evaluate(bars[i],eastern,orb);
      }
+   g_orb.SetReplay(false);
+   MqlDateTime now_eastern;
+   IctGmtToEastern(TimeGMT(),now_eastern);
+   int today=now_eastern.year*10000+now_eastern.mon*100+now_eastern.day;
+   if(GlobalVariableCheck("mt5bot.nasdaq.day") && (int)GlobalVariableGet("mt5bot.nasdaq.day")==today)
+      g_orb.MarkDailyDone();
    double open_price=0.0;
    bool seen=false,fade_done=false,with_done=false,daily_done=false;
    g_orb.ShotState(open_price,seen,fade_done,with_done,daily_done);
-   PrintFormat("EA|event=replay|bars=%d|order=%s|opens=%d|shot_open=%.2f|seen=%d|fade10=%d|with11=%d|daily=%d",
+   PrintFormat("EA|event=replay|bars=%d|order=%s|opens=%d|shot_open=%.2f|seen=%d|fade10=%d|with11=%d|daily=%d|early=1",
                copied,(newest_first ? "new_first" : "old_first"),opens,
                open_price,(int)seen,(int)fade_done,(int)with_done,(int)daily_done);
   }
@@ -939,6 +949,7 @@ void ShowBotLabel(void)
               StringFormat("fade a %.0f-point move at 10:00 New York",InpDayShotPoints)+"\n"+
               StringFormat("go with a %.0f-point move at 11:00 New York",InpDayShotPoints)+"\n"+
               "if that shot is not taken, one 11:00 trade, stop 30, target 120, $250\n"+
+              "on other days, take that trade early once 60 points is there and half has not been given back\n"+
               "afternoon buy on a 20-point drop, Wed Thu Fri\n"+
               days+structure);
       return;
@@ -1194,6 +1205,11 @@ void OnTick(void)
          g_signal_risk=(orb.session=="daily" ? 250.0 : 0.0);
          shot_sent=SubmitSignal(orb.signal,orb.stop_price,orb.stop_distance,orb.target,orb.session,comment);
          g_signal_risk=0.0;
+         if(shot_sent && orb.session=="daily" && eastern.hour*60+eastern.min<11*60)
+           {
+            int key=eastern.year*10000+eastern.mon*100+eastern.day;
+            GlobalVariableSet("mt5bot.nasdaq.day",key);
+           }
         }
       else if(orb.reason!="")
          PrintFormat("FILTER|event=no_entry|symbol=%s|session=%s|reason=%s",
