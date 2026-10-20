@@ -95,8 +95,12 @@ PAGE = """<!DOCTYPE html>
   table { width: 100%; border-collapse: collapse; }
   th { text-align: left; color: #9a9a9a; font-weight: 400; padding: 6px 8px; background: #141414; }
   td { padding: 7px 8px; border-top: 1px solid #222; color: #e0e0e0; }
-  td.up { color: #00c000; }
-  td.down { color: #ff5252; }
+  td.up { color: #1e88e5; }
+  td.down { color: #e53935; }
+  td.pnl { font-weight: 600; font-size: 13px; }
+  td.pnl.tick { animation: pnlflash 0.9s ease; }
+  @keyframes pnlflash { from { background: #2a2e32; } to { background: transparent; } }
+  #tradebox { border-bottom: 1px solid #000; }
   .empty { padding: 12px; color: #9a9a9a; }
   #journal { background: #000; border-top: 1px solid #222; max-height: 132px; overflow: auto; }
   #lines { padding: 4px 10px 8px; }
@@ -120,6 +124,12 @@ PAGE = """<!DOCTYPE html>
   <p class="boardline" id="board">Reading the terminal.</p>
   <div class="ideas" id="think"></div>
 </section>
+<section class="desk" id="tradebox">
+  <section class="panel">
+    <h2>Trade</h2>
+    <div id="trades"><div class="empty">No open trade.</div></div>
+  </section>
+</section>
 <section class="charts">
   <div class="chartbox">
     <div class="charthead" id="head-nas"><span>US100.cash, M5</span></div>
@@ -135,12 +145,6 @@ PAGE = """<!DOCTYPE html>
       <div class="corner" id="note-gold"></div>
     </div>
   </div>
-</section>
-<section class="desk">
-  <section class="panel">
-    <h2>Trades</h2>
-    <div id="trades"></div>
-  </section>
 </section>
 <section id="journal">
   <h2>Journal</h2>
@@ -201,6 +205,10 @@ function draw(id, chart) {
   levels.forEach(level => {
     if (!level.price) return;
     htag(parts, y, level.price, level.color, esc(level.label), left, right, level.dash);
+    if (level.name) {
+      const yy = y(level.price);
+      parts.push('<text x="'+(left+4)+'" y="'+(yy-4)+'" fill="'+level.color+'" font-size="11" font-family="Tahoma">'+esc(level.name)+'</text>');
+    }
   });
   svg.innerHTML = parts.join("");
 }
@@ -210,14 +218,14 @@ function head(id, chart) {
   el.innerHTML = "<span>" + esc(chart.title) + "</span><span class='px'>Bid <b>" + esc(chart.bid) + "</b>  Ask <b>" + esc(chart.ask) + "</b></span>";
 }
 function markTicks(root) {
-  const prev = markTicks.prev || {};
-  const next = {};
+  if (!markTicks.prev) markTicks.prev = {};
+  const scope = root.id || "root";
   root.querySelectorAll("[data-k]").forEach(el => {
-    const key = el.getAttribute("data-k");
-    next[key] = el.textContent;
-    if (prev[key] != null && prev[key] !== el.textContent) el.classList.add("tick");
+    const key = scope + ":" + el.getAttribute("data-k");
+    const now = el.textContent;
+    if (markTicks.prev[key] != null && markTicks.prev[key] !== now) el.classList.add("tick");
+    markTicks.prev[key] = now;
   });
-  markTicks.prev = next;
 }
 function render(data) {
   document.getElementById("symbol").textContent = "Pass bot   " + (data.symbol_line || "");
@@ -257,9 +265,12 @@ function render(data) {
   } else {
     const rows = trades.map(row => {
       const cls = row.profit > 0 ? "up" : (row.profit < 0 ? "down" : "");
-      return "<tr class='" + esc(row.side) + "'><td>" + esc(row.symbol) + "</td><td class='side " + esc(row.side) + "'>" + esc(row.side === "buy" ? "buy" : "sell") + "</td><td>" + esc(row.volume) + "</td><td>" + esc(row.price) + "</td><td>" + esc(row.sl) + "</td><td>" + esc(row.tp) + "</td><td class='" + cls + "'>" + esc(row.profit_text) + "</td></tr>";
+      const word = row.side === "buy" ? "buy" : "sell";
+      const key = esc(row.ticket || row.symbol);
+      return "<tr><td>" + esc(row.symbol) + "</td><td class='side " + esc(row.side) + "'>" + word + "</td><td>" + esc(row.volume) + "</td><td>" + esc(row.price) + "</td><td data-k='" + key + ":current'>" + esc(row.current) + "</td><td>" + esc(row.sl) + "</td><td>" + esc(row.tp) + "</td><td class='pnl " + cls + "' data-k='" + key + ":profit'>" + esc(row.profit_text) + "</td></tr>";
     }).join("");
-    box.innerHTML = "<table><tr><th>Symbol</th><th>Type</th><th>Volume</th><th>Price</th><th>S / L</th><th>T / P</th><th>Profit</th></tr>" + rows + "</table>";
+    box.innerHTML = "<table><tr><th>Symbol</th><th>Type</th><th>Volume</th><th>Open</th><th>Current</th><th>S / L</th><th>T / P</th><th>Profit</th></tr>" + rows + "</table>";
+    markTicks(box);
   }
   document.getElementById("lines").innerHTML = (data.journal || []).map(row => {
     return "<div class='jrow " + esc(row.kind || "") + "'><span>" + esc(row.time || "") + "</span><b>" + esc(row.text || "") + "</b></div>";
@@ -507,29 +518,37 @@ def chart_bars(symbol, timeframe, count, offset):
     return bars
 
 
-def level(price, color, label, dash=False):
-    return {"price": float(price), "color": color, "label": label, "dash": dash}
+def level(price, color, label, dash=False, name=""):
+    row = {"price": float(price), "color": color, "label": label, "dash": dash}
+    if name:
+        row["name"] = name
+    return row
 
 
 def position_levels(position):
-    levels = [level(position.price_open, "#ffffff", f"{float(position.price_open):.2f}")]
+    levels = [level(position.price_open, "#ffffff", f"{float(position.price_open):.2f}", name="entry")]
     if position.sl:
-        levels.append(level(position.sl, "#ff3b30", f"{float(position.sl):.2f}"))
+        levels.append(level(position.sl, "#ff3b30", f"{float(position.sl):.2f}", name="stop"))
     if position.tp:
-        levels.append(level(position.tp, "#00c000", f"{float(position.tp):.2f}"))
+        levels.append(level(position.tp, "#00c000", f"{float(position.tp):.2f}", name="target"))
     return levels
 
 
 def trade_row(position):
+    buy = position.type == mt5.POSITION_TYPE_BUY
+    current = float(position.price_current)
+    profit = float(position.profit)
     return {
+        "ticket": int(position.ticket),
         "symbol": position.symbol,
-        "side": "buy" if position.type == mt5.POSITION_TYPE_BUY else "sell",
+        "side": "buy" if buy else "sell",
         "volume": f"{float(position.volume):.2f}",
         "price": f"{float(position.price_open):.2f}",
+        "current": f"{current:.2f}",
         "sl": f"{float(position.sl):.2f}" if position.sl else "",
         "tp": f"{float(position.tp):.2f}" if position.tp else "",
-        "profit": float(position.profit),
-        "profit_text": f"{float(position.profit):,.2f}",
+        "profit": profit,
+        "profit_text": f"{profit:,.2f}",
     }
 
 
