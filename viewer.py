@@ -52,7 +52,34 @@ PAGE = """<!DOCTYPE html>
   header b { color: #fff; font-weight: 600; }
   .bad { color: #ff5252; }
   .good { color: #00c000; }
-  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: #000; height: 48vh; min-height: 280px; }
+  .board { background: #000; border-bottom: 1px solid #000; }
+  .board h2 { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .board h2 .when { font-weight: 400; color: #fff; }
+  .board h2 .clock { font-weight: 400; color: #fff; }
+  .pulse { width: 7px; height: 7px; border-radius: 50%; background: #00c000; display: inline-block; margin-left: 8px; vertical-align: middle; animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: 0.25; } }
+  .boardline { margin: 0; padding: 8px 12px; color: #fff; background: #000; border-bottom: 1px solid #222; line-height: 1.45; }
+  .ideas { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; }
+  .idea { min-width: 0; padding: 10px 12px 12px; background: #000; border-right: 1px solid #222; border-top: 2px solid #2a2e32; }
+  .idea.weighing { border-top-color: #fff; }
+  .idea.ready.buy { border-top-color: #1e88e5; }
+  .idea.ready.sell { border-top-color: #e53935; }
+  .idea.in { border-top-color: #fff; }
+  .idea-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding-bottom: 6px; border-bottom: 1px solid #222; }
+  .idea h3 { margin: 0; color: #fff; font: 600 13px Tahoma, sans-serif; }
+  .state { color: #b0b0b0; font: 600 12px Tahoma, sans-serif; white-space: nowrap; }
+  .state.close { color: #ffd700; }
+  .state.ready.buy { color: #1e88e5; }
+  .state.ready.sell { color: #e53935; }
+  .state.in { color: #fff; }
+  .lead { margin: 8px 0; color: #fff; line-height: 1.4; }
+  .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 12px; margin: 0 0 8px; }
+  .fact span { display: block; color: #808080; }
+  .fact b { display: block; margin-top: 1px; color: #fff; font-weight: 600; font-size: 13px; }
+  .fact b.tick, .clock.tick { animation: settle 0.9s ease; }
+  @keyframes settle { from { color: #ffd700; } to { color: #fff; } }
+  .idea p { margin: 0 0 4px; color: #c0c0c0; line-height: 1.45; }
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: #000; height: 34vh; min-height: 220px; }
   .chartbox { display: flex; flex-direction: column; min-width: 0; background: #000; }
   .charthead { display: flex; justify-content: space-between; gap: 8px; padding: 4px 8px; background: #2a2e32; color: #fff; }
   .charthead .px { color: #fff; }
@@ -60,21 +87,11 @@ PAGE = """<!DOCTYPE html>
   .chartwrap { position: relative; flex: 1; min-height: 0; background: #000; }
   svg { width: 100%; height: 100%; display: block; background: #000; }
   .corner { position: absolute; left: 8px; top: 6px; color: #fff; white-space: pre; line-height: 1.35; text-shadow: 1px 1px 0 #000; pointer-events: none; }
-  .desk { display: grid; grid-template-columns: 1.35fr 0.65fr; gap: 1px; background: #000; }
+  .desk { display: grid; grid-template-columns: 1fr; gap: 1px; background: #000; }
   .panel { background: #000; min-width: 0; }
   h2 { margin: 0; padding: 6px 10px; background: #2a2e32; color: #fff; font: 600 12px Tahoma, sans-serif; }
-  .think { display: grid; grid-template-columns: 1fr 1fr; }
-  .card { padding: 10px 12px 12px; border-right: 1px solid #222; }
-  .card h3 { margin: 0 0 8px; color: #fff; font: 600 13px Tahoma, sans-serif; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-  .pill { font: 600 12px Tahoma, sans-serif; }
-  .pill.wait { color: #d0d0d0; }
-  .pill.ready.buy, .side.buy { color: #1e88e5; }
-  .pill.ready.sell, .side.sell { color: #e53935; }
-  .pill.in { color: #fff; }
-  .pill.aside { color: #ffb300; }
-  .pill.off { color: #8a8a8a; }
-  .pill.block { color: #ff5252; }
-  .card p { margin: 0 0 4px; color: #d0d0d0; line-height: 1.45; }
+  .side.buy { color: #1e88e5; }
+  .side.sell { color: #e53935; }
   table { width: 100%; border-collapse: collapse; }
   th { text-align: left; color: #9a9a9a; font-weight: 400; padding: 6px 8px; background: #141414; }
   td { padding: 7px 8px; border-top: 1px solid #222; color: #e0e0e0; }
@@ -89,7 +106,7 @@ PAGE = """<!DOCTYPE html>
   .jrow.buy b { color: #00c000; }
   .jrow.reject b { color: #ff5252; }
   @media (max-width: 980px) {
-    .charts, .think, .desk { grid-template-columns: 1fr; }
+    .charts, .ideas, .facts { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -98,6 +115,11 @@ PAGE = """<!DOCTYPE html>
   <div id="symbol">Pass bot</div>
   <div id="account"></div>
 </header>
+<section class="board">
+  <h2><span>Thinking</span><span class="when"><span class="clock" id="clock"></span><i class="pulse"></i></span></h2>
+  <p class="boardline" id="board">Reading the terminal.</p>
+  <div class="ideas" id="think"></div>
+</section>
 <section class="charts">
   <div class="chartbox">
     <div class="charthead" id="head-nas"><span>US100.cash, M5</span></div>
@@ -115,10 +137,6 @@ PAGE = """<!DOCTYPE html>
   </div>
 </section>
 <section class="desk">
-  <section class="panel">
-    <h2>Thinking</h2>
-    <div class="think" id="think"></div>
-  </section>
   <section class="panel">
     <h2>Trades</h2>
     <div id="trades"></div>
@@ -191,9 +209,28 @@ function head(id, chart) {
   if (!chart) { el.innerHTML = ""; return; }
   el.innerHTML = "<span>" + esc(chart.title) + "</span><span class='px'>Bid <b>" + esc(chart.bid) + "</b>  Ask <b>" + esc(chart.ask) + "</b></span>";
 }
+function markTicks(root) {
+  const prev = markTicks.prev || {};
+  const next = {};
+  root.querySelectorAll("[data-k]").forEach(el => {
+    const key = el.getAttribute("data-k");
+    next[key] = el.textContent;
+    if (prev[key] != null && prev[key] !== el.textContent) el.classList.add("tick");
+  });
+  markTicks.prev = next;
+}
 function render(data) {
   document.getElementById("symbol").textContent = "Pass bot   " + (data.symbol_line || "");
   document.getElementById("account").innerHTML = data.account_html || "";
+  const clock = document.getElementById("clock");
+  const clockText = data.symbol_line || "";
+  if (clock.textContent !== clockText) {
+    clock.textContent = clockText;
+    clock.classList.remove("tick");
+    void clock.offsetWidth;
+    clock.classList.add("tick");
+  }
+  document.getElementById("board").textContent = data.board || "";
   const charts = {};
   (data.charts || []).forEach(chart => { charts[chart.id] = chart; });
   head("head-nas", charts.nas);
@@ -202,11 +239,17 @@ function render(data) {
   document.getElementById("note-gold").textContent = charts.gold ? (charts.gold.note || "") : "";
   draw("chart-nas", charts.nas);
   draw("chart-gold", charts.gold);
-  document.getElementById("think").innerHTML = (data.thinking || []).map(card => {
-    const lines = (card.lines || []).map(line => "<p>" + esc(line) + "</p>").join("");
+  const root = document.getElementById("think");
+  root.innerHTML = (data.thinking || []).map(card => {
     const side = card.side ? " " + esc(card.side) : "";
-    return "<div class='card'><h3>" + esc(card.market) + "<span class='pill " + esc(card.tone || "off") + side + "'>" + esc(card.state) + "</span></h3>" + lines + "</div>";
+    const weighing = (card.state === "Watching" || card.state === "Getting close" || card.state === "Ready" || card.state === "In a trade") ? " weighing" : "";
+    const facts = (card.facts || []).map(fact => {
+      return "<div class='fact'><span>" + esc(fact.label) + "</span><b class='live' data-k='" + esc(card.id) + ":" + esc(fact.label) + "'>" + esc(fact.value) + "</b></div>";
+    }).join("");
+    const lines = (card.lines || []).map(line => "<p>" + esc(line) + "</p>").join("");
+    return "<article class='idea" + weighing + " " + esc(card.tone || "") + side + "' id='idea-" + esc(card.id) + "'><div class='idea-top'><h3>" + esc(card.name) + "</h3><span class='state " + esc(card.tone || "") + side + "'>" + esc(card.state) + "</span></div><p class='lead'>" + esc(card.lead || "") + "</p><div class='facts'>" + facts + "</div>" + lines + "</article>";
   }).join("");
+  markTicks(root);
   const trades = data.trades || [];
   const box = document.getElementById("trades");
   if (!trades.length) {
@@ -231,7 +274,7 @@ async function tick() {
   }
 }
 tick();
-setInterval(tick, 2000);
+setInterval(tick, 1000);
 </script>
 </body>
 </html>
@@ -496,6 +539,451 @@ def ohlc_line(bar):
     return f"O {bar['o']:.2f}  H {bar['h']:.2f}  L {bar['l']:.2f}  C {bar['c']:.2f}"
 
 
+def day_name(now):
+    return ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")[now.weekday()]
+
+
+def next_shot_day(now):
+    ahead = {1: "Thursday", 2: "Thursday", 5: "Monday", 6: "Monday"}
+    return ahead.get(now.weekday(), "Monday")
+
+
+def shot_day(now):
+    return now.weekday() in (0, 3, 4)
+
+
+def clock_left(now, target_minute):
+    now_s = now.hour * 3600 + now.minute * 60 + now.second
+    left = target_minute * 60 - now_s
+    if left <= 0:
+        return "now"
+    minutes, seconds = divmod(left, 60)
+    if minutes >= 60:
+        hours, minutes = divmod(minutes, 60)
+        return f"{hours} h {minutes} min {seconds} sec"
+    if minutes:
+        return f"{minutes} min {seconds} sec"
+    return f"{seconds} sec"
+
+
+def bar_closes_in(now, start_minute):
+    now_s = now.hour * 3600 + now.minute * 60 + now.second
+    start_s = start_minute * 60
+    if now_s < start_s or now_s >= start_s + 300:
+        return None
+    return f"{start_s + 300 - now_s} sec"
+
+
+def price_text(value):
+    return f"{value:,.2f}"
+
+
+def open_930(bars):
+    for bar in bars:
+        if bar["t"] == "09:30":
+            return bar["o"]
+    return None
+
+
+def half_hour_move(bars):
+    closed = bars[:-1]
+    if len(closed) < 6:
+        return None
+    window = closed[-6:]
+    return window[-1]["c"] - window[0]["o"]
+
+
+def comment_of(position):
+    return (position.comment or "").lower() if position is not None else ""
+
+
+def nasdaq_role(position, now):
+    if position is None:
+        return None
+    if owns(position, "hop"):
+        return "hop"
+    if owns(position, "fallback"):
+        return "fallback"
+    if owns(position, "shots"):
+        return "shots"
+    return "shots" if shot_day(now) else "fallback"
+
+
+def owns(position, key):
+    text = comment_of(position)
+    if position is None:
+        return False
+    if key == "fallback":
+        return "daily" in text
+    if key == "hop":
+        return "ride" in text
+    if key == "shots":
+        return "orb am" in text or "orb day" in text
+    if key == "gold":
+        return "gold" in text
+    return False
+
+
+def idea(id_name, name, state, side, lead, facts, lines):
+    tone = {
+        "Watching": "watching",
+        "Getting close": "close",
+        "Ready": "ready",
+        "In a trade": "in",
+        "Passed": "passed",
+        "Standing aside": "aside",
+    }[state]
+    return {
+        "id": id_name,
+        "name": name,
+        "state": state,
+        "tone": tone,
+        "side": side or "",
+        "lead": lead,
+        "facts": facts,
+        "lines": lines,
+    }
+
+
+def trade_facts(position, bid):
+    side = "buy" if position.type == mt5.POSITION_TYPE_BUY else "sell"
+    word = "Buy" if side == "buy" else "Sell"
+    return side, word, [
+        {"label": "Bid", "value": price_text(bid)},
+        {"label": "Entry", "value": price_text(float(position.price_open))},
+        {"label": "Stop", "value": price_text(float(position.sl)) if position.sl else "—"},
+        {"label": "Target", "value": price_text(float(position.tp)) if position.tp else "—"},
+        {"label": "Open result", "value": f"{float(position.profit):+,.2f}"},
+        {"label": "Volume", "value": f"{float(position.volume):.2f}"},
+    ]
+
+
+def move_words(move, need):
+    if move is None:
+        return "The 09:30 open is not on the chart yet."
+    gone = abs(move)
+    way = "above" if move > 0 else "below" if move < 0 else "on"
+    short = need - gone
+    if move == 0:
+        return f"Price is on the 09:30 open. It needs {need:.1f} points."
+    if short > 0:
+        return f"Price is {gone:.1f} points {way} the open, {short:.1f} short of {need:.0f}."
+    return f"Price is {gone:.1f} points {way} the open. That clears {need:.0f}."
+
+
+def near_level(move, need):
+    if move is None:
+        return "Watching"
+    if abs(move) >= need:
+        return "met"
+    if abs(move) >= need * 0.67:
+        return "Getting close"
+    return "Watching"
+
+
+def board_line(now, ideas):
+    verbs = {
+        "Watching": ("is watching", "are watching"),
+        "Getting close": ("is getting close", "are getting close"),
+        "Ready": ("is ready", "are ready"),
+        "In a trade": ("is in a trade", "are in a trade"),
+        "Passed": ("has passed", "have passed"),
+        "Standing aside": ("is standing aside", "are standing aside"),
+    }
+    parts = []
+    for item in ideas:
+        plural = item["name"] == "Nasdaq shots"
+        parts.append(f"{item['name']} {verbs[item['state']][1 if plural else 0]}")
+    return f"{day_name(now)}. " + ". ".join(parts) + "."
+
+
+def shots_idea(now, minutes, bid, bars, position, trading):
+    move = None if open_930(bars) is None else bid - open_930(bars)
+    if nasdaq_role(position, now) == "shots":
+        side, word, facts = trade_facts(position, bid)
+        return idea(
+            "shots", "Nasdaq shots", "In a trade", side,
+            f"{word} {float(position.volume):.2f} lots from {price_text(float(position.price_open))}.",
+            facts,
+            ["Red line is the stop. Green line is the target."],
+        )
+    if not shot_day(now):
+        return idea(
+            "shots", "Nasdaq shots", "Standing aside", "",
+            f"Today is {day_name(now)}. Shots run on Monday, Thursday, and Friday.",
+            [
+                {"label": "Bid", "value": price_text(bid)},
+                {"label": "Needs", "value": "60 points"},
+                {"label": "Next", "value": next_shot_day(now)},
+                {"label": "From the open", "value": "—" if move is None else f"{move:+.1f}"},
+            ],
+            ["At 10:00 a 60 point move is faded. At 11:00 the same move is taken with it."],
+        )
+    if minutes >= 11 * 60 + 5:
+        return idea(
+            "shots", "Nasdaq shots", "Passed", "",
+            move_words(move, SHOT_POINTS),
+            [
+                {"label": "Bid", "value": price_text(bid)},
+                {"label": "From the open", "value": "—" if move is None else f"{move:+.1f}"},
+                {"label": "Needed", "value": "60 points"},
+                {"label": "Window", "value": "closed"},
+            ],
+            ["The 10:00 fade and the 11:00 shot have both been judged."],
+        )
+    weighing_11 = minutes >= 10 * 60 + 5
+    start = 11 * 60 if weighing_11 else 10 * 60
+    closes = bar_closes_in(now, start)
+    level = near_level(move, SHOT_POINTS)
+    if closes and level == "met":
+        state = "Ready"
+        side = ("buy" if move > 0 else "sell") if weighing_11 else ("sell" if move > 0 else "buy")
+        word = "Buy" if side == "buy" else "Sell"
+        action = "with the move" if weighing_11 else "the fade"
+        lead = f"Ready to {word.lower()} {action}."
+    elif level == "met":
+        state, side = "Getting close", ""
+        lead = move_words(move, SHOT_POINTS) + " Waiting for the bar to close."
+    elif level == "Getting close":
+        state, side = "Getting close", ""
+        lead = move_words(move, SHOT_POINTS)
+    else:
+        state, side = "Watching", ""
+        lead = move_words(move, SHOT_POINTS)
+    when = "11:00 goes with the move" if weighing_11 else "10:00 fades the move"
+    facts = [
+        {"label": "Bid", "value": price_text(bid)},
+        {"label": "From the open", "value": "—" if move is None else f"{move:+.1f}"},
+        {"label": "Short of 60", "value": "—" if move is None else f"{max(0.0, SHOT_POINTS - abs(move)):.1f}"},
+        {"label": "Bar closes" if closes else f"{'11:00' if weighing_11 else '10:00'} in", "value": closes or clock_left(now, start)},
+    ]
+    lines = [f"{when}. Stop {SHOT_STOP:.0f}, target {SHOT_TARGET:.0f}, risk ${SHOT_RISK:.0f}."]
+    if weighing_11:
+        lines.append("The 10:00 fade has passed.")
+    if state == "Ready" and not trading:
+        lines.append("Trading is off on this login, so no order will be sent.")
+    return idea("shots", "Nasdaq shots", state, side, lead, facts, lines)
+
+
+def fallback_idea(now, minutes, bid, bars, position, trading):
+    opened = open_930(bars)
+    move = None if opened is None else bid - opened
+    role = nasdaq_role(position, now)
+    if role == "fallback":
+        side, word, facts = trade_facts(position, bid)
+        return idea(
+            "fallback", "11:00 fallback", "In a trade", side,
+            f"{word} {float(position.volume):.2f} lots from {price_text(float(position.price_open))}.",
+            facts,
+            ["Stop 30. Target 120. This is the one Nasdaq trade."],
+        )
+    if now.weekday() >= 5:
+        return idea(
+            "fallback", "11:00 fallback", "Standing aside", "",
+            "The Nasdaq session is closed for the weekend.",
+            [{"label": "Bid", "value": price_text(bid)}, {"label": "Needs", "value": "0.5 points"}, {"label": "Stop", "value": "30"}, {"label": "Target", "value": "120"}],
+            ["It returns on Monday, one trade at 11:00 New York."],
+        )
+    if role == "shots":
+        return idea(
+            "fallback", "11:00 fallback", "Standing aside", "",
+            "A Nasdaq shot has the account.",
+            [
+                {"label": "Bid", "value": price_text(bid)},
+                {"label": "From the open", "value": "—" if move is None else f"{move:+.1f}"},
+                {"label": "Needs", "value": "0.5 points"},
+                {"label": "11:00 in", "value": clock_left(now, 11 * 60)},
+            ],
+            ["The smaller 11:00 trade waits until that shot is flat."],
+        )
+    if shot_day(now) and move is not None and abs(move) >= SHOT_POINTS and minutes <= 11 * 60 + 4:
+        return idea(
+            "fallback", "11:00 fallback", "Standing aside", "",
+            "The move is large enough for the 11:00 shot.",
+            [
+                {"label": "Bid", "value": price_text(bid)},
+                {"label": "From the open", "value": f"{move:+.1f}"},
+                {"label": "Shot line", "value": "60"},
+                {"label": "This trade", "value": "steps aside"},
+            ],
+            ["The 60 point shot goes first. This smaller trade is the backup."],
+        )
+    if minutes >= 11 * 60 + 5:
+        return idea(
+            "fallback", "11:00 fallback", "Passed", "",
+            move_words(move, 0.5) if move is not None else "The 11:00 bar has closed.",
+            [
+                {"label": "Bid", "value": price_text(bid)},
+                {"label": "From the open", "value": "—" if move is None else f"{move:+.1f}"},
+                {"label": "Needed", "value": "0.5 points"},
+                {"label": "Window", "value": "closed"},
+            ],
+            ["That was the Nasdaq decision for today."],
+        )
+    enough = move is not None and abs(move) >= 0.5
+    closes = bar_closes_in(now, 11 * 60)
+    if closes and enough:
+        side = "buy" if move > 0 else "sell"
+        word = "buy" if side == "buy" else "sell"
+        state, lead = "Ready", f"Ready to {word} the 11:00 trade."
+    elif enough and minutes >= 10 * 60 + 30:
+        state, side = "Getting close", ""
+        lead = move_words(move, 0.5)
+    else:
+        state, side = "Watching", ""
+        lead = "Waiting for the 09:30 New York open." if move is None else move_words(move, 0.5)
+    lines = ["One Nasdaq trade at 11:00, with the morning. Stop 30, target 120, risk $250."]
+    if state == "Ready" and not trading:
+        lines.append("Trading is off on this login, so no order will be sent.")
+    return idea(
+        "fallback", "11:00 fallback", state, side, lead,
+        [
+            {"label": "Bid", "value": price_text(bid)},
+            {"label": "From the open", "value": "—" if move is None else f"{move:+.1f}"},
+            {"label": "Needs", "value": "0.5 points"},
+            {"label": "11:00 in" if not closes else "Bar closes", "value": closes or clock_left(now, 11 * 60)},
+        ],
+        lines,
+    )
+
+
+def hop_idea(now, bid, bars, position):
+    move = half_hour_move(bars)
+    move_text = "—" if move is None else f"{move:+.1f}"
+    if owns(position, "hop"):
+        side, word, facts = trade_facts(position, bid)
+        return idea(
+            "hop", "The hop", "In a trade", side,
+            f"{word} {float(position.volume):.2f} lots from {price_text(float(position.price_open))}.",
+            facts,
+            ["This hop was left off. An open one is still managed."],
+        )
+    return idea(
+        "hop", "The hop", "Standing aside", "",
+        "Both hops on this account were stopped out, so this stays off.",
+        [
+            {"label": "Bid", "value": price_text(bid)},
+            {"label": "Last 30 min", "value": move_text},
+            {"label": "Would need", "value": "12 points"},
+            {"label": "After 11:00", "value": "off"},
+        ],
+        ["Empty days stay with the one 11:00 trade. The hop does not replace it."],
+    )
+
+
+def gold_used(now):
+    key = now.year * 10000 + now.month * 100 + now.day
+    try:
+        if not mt5.global_variable_check("mt5bot.gold.day"):
+            return 0
+        if int(mt5.global_variable_get("mt5bot.gold.day")) != key:
+            return 0
+        if not mt5.global_variable_check("mt5bot.gold.count"):
+            return 0
+        return int(mt5.global_variable_get("mt5bot.gold.count"))
+    except Exception:
+        return 0
+
+
+def gold_idea(now, minutes, trading, nasdaq_open, position, bid, ask, closed):
+    if position is not None:
+        side, word, facts = trade_facts(position, bid if bid is not None else float(position.price_open))
+        return idea(
+            "gold", "Gold scalp", "In a trade", side,
+            f"{word} {float(position.volume):.2f} lots from {price_text(float(position.price_open))}.",
+            facts,
+            ["It stands down at 16:00 New York, or sooner if a Nasdaq shot needs the account."],
+        )
+    if now.weekday() >= 5:
+        return idea(
+            "gold", "Gold scalp", "Standing aside", "",
+            "Gold is off for the weekend.",
+            [{"label": "Bid", "value": "—"}, {"label": "Needs", "value": "1.20"}, {"label": "Spread", "value": "—"}, {"label": "Today", "value": "0 of 2"}],
+            ["It trades again from 03:00 New York on Monday."],
+        )
+    used = gold_used(now)
+    if nasdaq_open:
+        return idea(
+            "gold", "Gold scalp", "Standing aside", "",
+            "Nasdaq has the account. Gold waits until that trade is flat.",
+            [{"label": "Bid", "value": "—" if bid is None else price_text(bid)}, {"label": "Needs", "value": "1.20"}, {"label": "Today", "value": f"{used} of 2"}, {"label": "Window", "value": "aside"}],
+            ["A gold scalp does not share the account with an open Nasdaq trade."],
+        )
+    if minutes >= 16 * 60:
+        return idea(
+            "gold", "Gold scalp", "Passed", "",
+            "Gold finished at 16:00 New York.",
+            [{"label": "Bid", "value": "—" if bid is None else price_text(bid)}, {"label": "Needs", "value": "1.20"}, {"label": "Today", "value": f"{used} of 2"}, {"label": "Window", "value": "closed"}],
+            ["The next gold window opens at 03:00."],
+        )
+    if minutes < 3 * 60:
+        return idea(
+            "gold", "Gold scalp", "Watching", "",
+            "Gold starts at 03:00 New York.",
+            [{"label": "Bid", "value": "—" if bid is None else price_text(bid)}, {"label": "Needs", "value": "1.20"}, {"label": "Opens in", "value": clock_left(now, 3 * 60)}, {"label": "Today", "value": f"{used} of 2"}],
+            ["It buys or sells a move that is already going."],
+        )
+    blocked = (shot_day(now) and 9 * 60 + 50 <= minutes <= 11 * 60) or (not shot_day(now) and 10 * 60 + 50 <= minutes <= 11 * 60)
+    if blocked:
+        back = "11:01" if minutes <= 11 * 60 else "now"
+        return idea(
+            "gold", "Gold scalp", "Standing aside", "",
+            "Standing aside so the Nasdaq trade goes first.",
+            [{"label": "Bid", "value": "—" if bid is None else price_text(bid)}, {"label": "Needs", "value": "1.20"}, {"label": "Back at", "value": back}, {"label": "Today", "value": f"{used} of 2"}],
+            ["On shot days gold steps aside from 09:50. On other days, from 10:50 until 11:00."],
+        )
+    if used >= 2:
+        return idea(
+            "gold", "Gold scalp", "Passed", "",
+            "Both gold trades for today have been used.",
+            [{"label": "Bid", "value": "—" if bid is None else price_text(bid)}, {"label": "Needs", "value": "1.20"}, {"label": "Today", "value": "2 of 2"}, {"label": "Spread", "value": "—" if bid is None or ask is None else f"{ask - bid:.2f}"}],
+            ["It can look again after 03:00 tomorrow."],
+        )
+    if bid is None or ask is None or closed is None or len(closed) < 3:
+        return idea(
+            "gold", "Gold scalp", "Watching", "",
+            "Gold prices are not in yet.",
+            [{"label": "Bid", "value": "—"}, {"label": "Needs", "value": "1.20"}, {"label": "Spread", "value": "—"}, {"label": "Today", "value": f"{used} of 2"}],
+            ["It needs the last three closed minutes."],
+        )
+    net = float(closed[-1]["close"]) - float(closed[0]["open"])
+    spread = ask - bid
+    short = max(0.0, GOLD_MIN - abs(net))
+    facts = [
+        {"label": "Bid", "value": price_text(bid)},
+        {"label": "Last 3 min", "value": f"{net:+.2f}"},
+        {"label": "Short of 1.20", "value": f"{short:.2f}"},
+        {"label": "Spread", "value": f"{spread:.2f}"},
+    ]
+    lines = [f"It needs a {GOLD_MIN:.2f} move over the last three minutes. Spread limit 0.60. Risk ${GOLD_RISK:.0f}. Today {used} of 2."]
+    if spread > 0.60:
+        lines.append(f"The spread is {spread:.2f}, wider than 0.60, so it will not bite.")
+        return idea("gold", "Gold scalp", "Watching", "", f"Last 3 minutes {net:+.2f}. The spread is too wide.", facts, lines)
+    if abs(net) < GOLD_MIN * 0.67:
+        return idea("gold", "Gold scalp", "Watching", "", f"Last 3 minutes {net:+.2f}. It is {short:.2f} short of {GOLD_MIN:.2f}.", facts, lines)
+    if abs(net) < GOLD_MIN:
+        return idea("gold", "Gold scalp", "Getting close", "", f"Last 3 minutes {net:+.2f}. It is {short:.2f} short of {GOLD_MIN:.2f}.", facts, lines)
+    buy = net > 0
+    window = list(closed)
+    if buy:
+        pullback = max(float(bar["high"]) for bar in window) - float(window[-1]["close"])
+    else:
+        pullback = float(window[-1]["close"]) - min(float(bar["low"]) for bar in window)
+    if pullback > abs(net) * 0.5:
+        lines.append("The move gave back half. Waiting for the next push.")
+        return idea("gold", "Gold scalp", "Watching", "", f"Last 3 minutes {net:+.2f}, but half of it has been given back.", facts, lines)
+    bite = min(2.50, max(0.90, abs(net) * 0.50))
+    stop = min(1.60, max(0.80, pullback + 0.30))
+    if bite < stop or bite < spread * 2:
+        lines.append("The target is too close for the stop and the spread.")
+        return idea("gold", "Gold scalp", "Watching", "", f"Last 3 minutes {net:+.2f}. The bite is too small.", facts, lines)
+    side = "buy" if buy else "sell"
+    lines.append(f"Wants to {side}. Risk ${GOLD_RISK:.0f}.")
+    if not trading:
+        lines.append("Trading is off on this login, so no order will be sent.")
+    return idea("gold", "Gold scalp", "Ready", side, f"Ready to {side} the gold move.", facts, lines)
+
+
 def nas_view(now, minutes, bid, ask, bars, trading, position):
     open930 = None
     for bar in bars:
@@ -562,6 +1050,7 @@ def gold_view(now, minutes, trading, nasdaq_open, position):
     state, tone = "Off", "off"
     bid = ask = None
     bars = []
+    closed = None
     if not mt5.symbol_select(GOLD, True):
         lines.append("XAUUSD is not on this account.")
     else:
@@ -642,7 +1131,7 @@ def gold_view(now, minutes, trading, nasdaq_open, position):
         "bars": bars[-70:],
         "levels": levels,
         "note": "XAUUSD,M1\n" + ohlc_line(last),
-        "thinking": {"market": "Gold", "state": state, "tone": tone, "side": side, "lines": lines},
+        "thinking": gold_idea(now, minutes, trading, nasdaq_open, position, bid, ask, closed),
     }
 
 
@@ -661,9 +1150,12 @@ def blank_snapshot(message):
             {"id": "nas", "title": "US100.cash, M5", **empty},
             {"id": "gold", "title": "XAUUSD, M1", **empty},
         ],
+        "board": message,
         "thinking": [
-            {"market": "Nasdaq", "state": "Off", "tone": "off", "side": "", "lines": [message]},
-            {"market": "Gold", "state": "Off", "tone": "off", "side": "", "lines": [message]},
+            idea("shots", "Nasdaq shots", "Watching", "", message, [], [message]),
+            idea("fallback", "11:00 fallback", "Watching", "", message, [], [message]),
+            idea("hop", "The hop", "Watching", "", message, [], [message]),
+            idea("gold", "Gold scalp", "Watching", "", message, [], [message]),
         ],
         "trades": [],
         "journal": journal_lines(),
@@ -686,8 +1178,15 @@ def snapshot_now():
     nas_positions = [p for p in (mt5.positions_get(symbol=SYMBOL) or []) if p.magic == MAGIC]
     gold_positions = [p for p in (mt5.positions_get(symbol=GOLD) or []) if p.magic == MAGIC]
     trading = bool(info.trade_allowed) if info is not None else False
-    nas = nas_view(now, minutes, bid, ask, bars, trading, nas_positions[0] if nas_positions else None)
+    nas_position = nas_positions[0] if nas_positions else None
+    nas = nas_view(now, minutes, bid, ask, bars, trading, nas_position)
     gold = gold_view(now, minutes, trading, bool(nas_positions), gold_positions[0] if gold_positions else None)
+    ideas = [
+        shots_idea(now, minutes, bid, bars, nas_position, trading),
+        fallback_idea(now, minutes, bid, bars, nas_position, trading),
+        hop_idea(now, bid, bars, nas_position),
+        gold["thinking"],
+    ]
     balance = float(info.balance) if info is not None else 0.0
     if info is None:
         account = "MetaTrader is not connected"
@@ -701,11 +1200,12 @@ def snapshot_now():
     return {
         "symbol_line": f"New York {now.strftime('%H:%M:%S')}",
         "account_html": account,
+        "board": board_line(now, ideas),
         "charts": [
             {key: nas[key] for key in ("id", "title", "bid", "ask", "bars", "levels", "note")},
             {key: gold[key] for key in ("id", "title", "bid", "ask", "bars", "levels", "note")},
         ],
-        "thinking": [nas["thinking"], gold["thinking"]],
+        "thinking": ideas,
         "trades": trades,
         "journal": journal_lines(),
     }
@@ -713,13 +1213,14 @@ def snapshot_now():
 
 _snapshot_lock = threading.Lock()
 _snapshot_busy = False
+_last_snapshot = None
 
 
 def snapshot():
-    global _snapshot_busy
+    global _snapshot_busy, _last_snapshot
     with _snapshot_lock:
         if _snapshot_busy:
-            return blank_snapshot("MetaTrader is waiting for the login")
+            return _last_snapshot or blank_snapshot("MetaTrader is waiting for the login")
         _snapshot_busy = True
     box = {}
 
@@ -737,10 +1238,14 @@ def snapshot():
     thread.start()
     thread.join(2.0)
     if thread.is_alive():
-        return blank_snapshot("MetaTrader is waiting for the login")
+        return _last_snapshot or blank_snapshot("MetaTrader is waiting for the login")
     if box.get("error"):
         return blank_snapshot("MetaTrader is not connected")
-    return box.get("value") or blank_snapshot("MetaTrader is not connected")
+    value = box.get("value") or blank_snapshot("MetaTrader is not connected")
+    charts = value.get("charts") or []
+    if charts and charts[0].get("bars"):
+        _last_snapshot = value
+    return value
 
 
 def esc_text(value):
@@ -760,6 +1265,7 @@ class Handler(BaseHTTPRequestHandler):
         payload = PAGE.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(payload)
 
