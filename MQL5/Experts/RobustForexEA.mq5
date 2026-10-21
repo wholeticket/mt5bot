@@ -509,6 +509,11 @@ int OnInit(void)
    orb.pm_drive_move=80.0;
    orb.pm_drive_stop=20.0;
    orb.pm_drive_target=100.0;
+   orb.london_on=true;         // 03:30 NY (08:30 UK) London Open range-fade (5..30 pts)
+   orb.london_min_move=5.0;
+   orb.london_max_move=30.0;
+   orb.london_stop=15.0;
+   orb.london_target=90.0;
    if((bool)MQLInfoInteger(MQL_TESTER))
      {
       // 10:00 fade on Thursday (8); 11:00 trend shot on Mon/Wed/Thu/Fri (29).
@@ -537,7 +542,7 @@ int OnInit(void)
    PrintFormat("EA|event=initialized|bot=%s|symbol=%s|entry=%s|structure=%s|bias=%s|magic=%I64u",
                BotLabel(),_Symbol,EnumToString(InpEntryTimeframe),EnumToString(InpStructureTimeframe),
                EnumToString(InpBiasTimeframe),InpMagicNumber);
-   PrintFormat("EA|event=book|daily=%d|daily_stop=%.0f|daily_target=%.0f|daily_risk=1400|shots=%d|weekdays=%d|fade10=%d|stop=%.0f|target=%.0f|risk=%.0f|pm1430=1",
+   PrintFormat("EA|event=book|london=1|lon_stop=15|lon_target=90|daily=%d|daily_stop=%.0f|daily_target=%.0f|daily_risk=1400|shots=%d|weekdays=%d|fade10=%d|stop=%.0f|target=%.0f|risk=%.0f|pm1430=1",
                (int)orb.daily_on,orb.daily_stop,orb.daily_target,(int)orb.day_shots,orb.weekdays,
                orb.fade10_weekdays,orb.fixed_stop,orb.day_target,InpFixedRiskMoney);
    PrintFormat("EA|event=structure|enabled=%d|continuation=%d|inverse=%d",
@@ -966,10 +971,11 @@ void ShowBotLabel(void)
    if(InpDayShots && !InpOrbMorningFade)
      {
       Comment(BotLabel()+"\n"+risk+"\n"+
-              StringFormat("Thu 10:00 fade a %.0f-point move ($2,400, stop 20, target 155)",InpDayShotPoints)+"\n"+
-              StringFormat("Mon/Wed/Thu/Fri 11:00 go with a %.0f-point move ($2,400, stop 20, target 155)",InpDayShotPoints)+"\n"+
-              "All weekdays 11:00 fade a 10..60 point range move ($1,400, stop 20, target 120)\n"+
-              "Wed/Thu/Fri 14:30 go with an 80-point afternoon drive from 13:00 ($1,400, stop 20, target 100)\n"+
+              "All weekdays 08:30 UK (03:30 NY) fade a 5..30 point London move ($1,400, stop 15, target 90)\n"+
+              StringFormat("Thu 10:00 NY fade a %.0f-point move ($2,400, stop 20, target 155)",InpDayShotPoints)+"\n"+
+              StringFormat("Mon/Wed/Thu/Fri 11:00 NY go with a %.0f-point move ($2,400, stop 20, target 155)",InpDayShotPoints)+"\n"+
+              "All weekdays 11:00 NY fade a 10..60 point range move ($1,400, stop 20, target 120)\n"+
+              "Wed/Thu/Fri 14:30 NY go with an 80-point afternoon drive from 13:00 ($1,400, stop 20, target 100)\n"+
               days+structure);
       return;
      }
@@ -1060,6 +1066,11 @@ bool FlatOpeningRange(void)
       return false;
 
    string comment=PositionGetString(POSITION_COMMENT);
+   if(StringFind(comment,"ORB london")>=0 && minutes>=9*60+20)
+     {
+      g_trades.CloseManaged(_Symbol,"london_flat");
+      return true;
+     }
    if(StringFind(comment,"ORB am")>=0 && minutes>=11*60+30)
      {
       g_trades.CloseManaged(_Symbol,"am_flat");
@@ -1218,10 +1229,11 @@ void OnTick(void)
       bool shot_sent=false;
       if(g_orb.Evaluate(closed[0],eastern,orb)!=ICT_SIGNAL_NONE)
         {
-         string comment=(orb.session=="am" ? "ORB am" :
+         string comment=(orb.session=="london" ? "ORB london" :
+                        (orb.session=="am" ? "ORB am" :
                         (orb.session=="day" ? "ORB day" :
-                        (orb.session=="daily" ? "ORB daily" : "ORB pm")));
-         g_signal_risk=(orb.session=="daily" ? 1400.0 : 0.0);
+                        (orb.session=="daily" ? "ORB daily" : "ORB pm"))));
+         g_signal_risk=((orb.session=="daily" || orb.session=="london") ? 1400.0 : 0.0);
          shot_sent=SubmitSignal(orb.signal,orb.stop_price,orb.stop_distance,orb.target,orb.session,comment);
          g_signal_risk=0.0;
          if(shot_sent && orb.session=="daily" && eastern.hour*60+eastern.min<11*60)

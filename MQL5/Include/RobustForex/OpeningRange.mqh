@@ -42,6 +42,11 @@ struct OrbSettings
    double pm_drive_move;       // points from the 13:00 open
    double pm_drive_stop;
    double pm_drive_target;
+   bool   london_on;           // 03:30 NY (08:30 UK) London Open range-fade
+   double london_min_move;     // 5.0 points from 03:00 NY (08:00 UK) open
+   double london_max_move;     // 30.0 points max
+   double london_stop;         // 15.0 points stop
+   double london_target;       // 90.0 points target (6R)
   };
 
 struct OrbSignal
@@ -81,6 +86,9 @@ private:
    double      m_pm_drive_open;
    bool        m_pm_drive_seen;
    bool        m_pm_drive_done;
+   double      m_london_open;
+   bool        m_london_seen;
+   bool        m_london_done;
    double      m_drive_high;
    double      m_drive_low;
    bool        m_drive_seen;
@@ -111,6 +119,9 @@ private:
       m_pm_drive_open=0.0;
       m_pm_drive_seen=false;
       m_pm_drive_done=false;
+      m_london_open=0.0;
+      m_london_seen=false;
+      m_london_done=false;
       m_drive_high=0.0;
       m_drive_low=0.0;
       m_drive_seen=false;
@@ -274,6 +285,9 @@ public:
       m_pm_drive_open=0.0;
       m_pm_drive_seen=false;
       m_pm_drive_done=false;
+      m_london_open=0.0;
+      m_london_seen=false;
+      m_london_done=false;
      }
 
    void Configure(const OrbSettings &settings)
@@ -338,6 +352,37 @@ public:
       stop_distance=m_cfg.fixed_stop;
       target=m_am_close-m_cfg.fixed_stop*m_cfg.reward_risk;
       return ICT_SIGNAL_SELL;
+     }
+
+   // London Open range-fade at 03:30 NY (08:30 UK) off the 03:00 NY (08:00 UK) open.
+   // When the first 30 minutes of London move 5..30 points on US100.cash, fade it
+   // back toward the London open with a 15-point stop and 90-point target ($1,400 risk).
+   // Flattened at 09:20 NY (14:20 UK) so the account is always free before 09:30 NY.
+   ENUM_ICT_SIGNAL LondonFade(const MqlRates &bar,const int bar_min,
+                              double &stop_distance,double &target)
+     {
+      if(!m_cfg.london_on)
+         return ICT_SIGNAL_NONE;
+      if(bar_min==3*60)
+        {
+         m_london_open=bar.open;
+         m_london_seen=true;
+        }
+      if(!m_london_seen || m_london_done || bar_min!=3*60+30)
+         return ICT_SIGNAL_NONE;
+
+      m_london_done=true;
+      if(m_replay)
+         return ICT_SIGNAL_NONE;
+
+      double move=bar.close-m_london_open;
+      if(MathAbs(move)<m_cfg.london_min_move || MathAbs(move)>=m_cfg.london_max_move)
+         return ICT_SIGNAL_NONE;
+
+      bool buy=(move<0.0);
+      stop_distance=m_cfg.london_stop;
+      target=bar.close+(buy ? m_cfg.london_target : -m_cfg.london_target);
+      return (buy ? ICT_SIGNAL_BUY : ICT_SIGNAL_SELL);
      }
 
    // Two later shots off the same 09:30 open. At 10:00 a move of day_move
@@ -560,6 +605,16 @@ public:
       int bar_min=eastern.hour*60+eastern.min;
       if(m_cfg.style==2)
         {
+         if(m_cfg.london_on)
+           {
+            ENUM_ICT_SIGNAL lon=LondonFade(bar,bar_min,out.stop_distance,out.target);
+            if(lon!=ICT_SIGNAL_NONE)
+              {
+               out.signal=lon;
+               out.session="london";
+               return lon;
+              }
+           }
          if(shot_day && m_cfg.morning_fade)
            {
             ENUM_ICT_SIGNAL fade=MorningShorts(bar,bar_min,out.stop_distance,out.target);

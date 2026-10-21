@@ -37,6 +37,11 @@ PM_DRIVE_POINTS = 80.0
 PM_DRIVE_STOP = 20.0
 PM_DRIVE_TARGET = 100.0
 PM_DRIVE_RISK = 1400.0
+LONDON_MIN = 5.0
+LONDON_MAX = 30.0
+LONDON_STOP = 15.0
+LONDON_TARGET = 90.0
+LONDON_RISK = 1400.0
 RIDE_RISK = 400.0
 GOLD = "XAUUSD"
 GOLD_MIN = 1.20
@@ -449,9 +454,18 @@ def ride_order(bars, bid, ask):
 
 def wanted_order(move, minutes, bars, bid, ask, shot_day, now=None):
     wd = now.weekday() if now is not None else 0
+    if 3 * 60 <= minutes < 3 * 60 + 35:
+        op3 = open_0300(bars)
+        if op3 is not None:
+            mv_lon = bid - op3
+            if LONDON_MIN <= abs(mv_lon) < LONDON_MAX:
+                side = "sell" if mv_lon > 0 else "buy"
+                word = "Buy" if side == "buy" else "Sell"
+                return order_from(side, bid, ask, LONDON_STOP, LONDON_TARGET, LONDON_RISK, "ORB london"), f"{word} the 08:30 UK (03:30 NY) London range-fade ({mv_lon:+.1f} pts, $1,400)."
+            return None, f"Watching 08:30 UK (03:30 NY) London open: {mv_lon:+.1f} pts (fades 5..30 pt move)."
     if move is None:
         if shot_day:
-            return None, "Waiting for the 09:30 New York open."
+            return None, "Waiting for the 09:30 New York open (after 08:30 UK London setup)."
         return None, "Waiting for the 09:30 open. Today has the 11:00 range-fade ($1,400)."
     if wd == 3 and minutes < 10 * 60:
         if abs(move) < SHOT_POINTS:
@@ -623,6 +637,13 @@ def price_text(value):
 def open_930(bars):
     for bar in bars:
         if bar["t"] == "09:30":
+            return bar["o"]
+    return None
+
+
+def open_0300(bars):
+    for bar in bars:
+        if bar["t"] == "03:00":
             return bar["o"]
     return None
 
@@ -1009,25 +1030,58 @@ def gold_used(now):
         return 0
 
 
-def gold_idea(now, minutes, trading, nasdaq_open, position, bid, ask, closed):
-    if position is not None:
-        side, word, facts = trade_facts(position, bid if bid is not None else float(position.price_open))
+def gold_idea(now, minutes, trading, nasdaq_open, position, bid, ask, closed, nas_bars=None, nas_bid=None, nas_pos=None):
+    op3 = open_0300(nas_bars or [])
+    mv_lon = None if (op3 is None or nas_bid is None) else (nas_bid - op3)
+    move_text = "—" if mv_lon is None else f"{mv_lon:+.1f}"
+    if nas_pos is not None and "london" in comment_of(nas_pos):
+        side, word, facts = trade_facts(nas_pos, nas_bid if nas_bid is not None else float(nas_pos.price_open))
         return idea(
-            "gold", "Gold scalp", "In a trade", side,
-            f"{word} {float(position.volume):.2f} lots from {price_text(float(position.price_open))}.",
+            "gold", "08:30 UK London fade", "In a trade", side,
+            f"{word} {float(nas_pos.volume):.2f} lots from {price_text(float(nas_pos.price_open))}.",
             facts,
-            ["Managing open gold position."],
+            ["US100.cash London Open fade ($1,400 risk, stop 15, target 90). Closes by 14:20 UK (09:20 NY)."],
         )
+    if now.weekday() >= 5:
+        return idea(
+            "gold", "08:30 UK London fade", "Standing aside", "",
+            "London session is closed for the weekend.",
+            [{"label": "US100 Bid", "value": "—" if nas_bid is None else price_text(nas_bid)}, {"label": "Band", "value": "5..30 pts"}, {"label": "Stop / Target", "value": "15 / 90"}, {"label": "Risk", "value": "$1,400"}],
+            ["Fades a 5..30 pt drift between 08:00 and 08:30 UK (03:00->03:30 NY) on US100.cash."],
+        )
+    if minutes >= 3 * 60 + 35:
+        return idea(
+            "gold", "08:30 UK London fade", "Passed", "",
+            "The 08:30 UK (03:30 NY) London Open trade has been judged for today.",
+            [
+                {"label": "US100 Bid", "value": "—" if nas_bid is None else price_text(nas_bid)},
+                {"label": "Since 08:00 UK", "value": move_text},
+                {"label": "Band", "value": "5..30 pts"},
+                {"label": "Window", "value": "closed"},
+            ],
+            ["Any open London trade flattens at 14:20 UK (09:20 NY) before Wall Street opens."],
+        )
+    closes = bar_closes_in(now, 3 * 60 + 30)
+    in_band = mv_lon is not None and LONDON_MIN <= abs(mv_lon) < LONDON_MAX
+    if closes and in_band and nas_pos is None:
+        side = "sell" if mv_lon > 0 else "buy"
+        state = "Ready"
+        lead = f"Ready to {side} (fade) the 08:30 UK London drift ({mv_lon:+.1f} pts)."
+    elif in_band and minutes >= 3 * 60:
+        state, side = "Getting close", ""
+        lead = f"US100 is {mv_lon:+.1f} pts from 08:00 UK open (inside the 5..30 pt fade band)."
+    else:
+        state, side = "Watching", ""
+        lead = "Waiting for 08:00 UK (03:00 NY) London open." if mv_lon is None else f"Since 08:00 UK: {mv_lon:+.1f} pts (fade band is 5..30 pts at 08:30 UK)."
     return idea(
-        "gold", "Gold scalp", "Standing aside", "",
-        "Gold scalping is turned off so the account focuses 100% on the 4-rule Nasdaq book.",
+        "gold", "08:30 UK London fade", state, side, lead,
         [
-            {"label": "Bid", "value": "—" if bid is None else price_text(bid)},
-            {"label": "State", "value": "off"},
-            {"label": "Spread", "value": "—" if bid is None or ask is None else f"{ask - bid:.2f}"},
-            {"label": "Focus", "value": "US100.cash"},
+            {"label": "US100 Bid", "value": "—" if nas_bid is None else price_text(nas_bid)},
+            {"label": "Since 08:00 UK", "value": move_text},
+            {"label": "Band", "value": "5..30 pts"},
+            {"label": "08:30 UK in" if not closes else "Bar closes", "value": closes or clock_left(now, 3 * 60 + 30)},
         ],
-        ["Turned off after 2026 backtests showed negative expectancy on XAUUSD M1 scalps."],
+        ["All 5 weekdays at 08:30 UK (03:30 NY): fade a 5..30 pt London drift on US100.cash. Stop 15, target 90, risk $1,400."],
     )
 
 
@@ -1182,11 +1236,12 @@ def snapshot_now():
     nas_position = nas_positions[0] if nas_positions else None
     nas = nas_view(now, minutes, bid, ask, bars, trading, nas_position)
     gold = gold_view(now, minutes, trading, bool(nas_positions), gold_positions[0] if gold_positions else None)
+    london_card = gold_idea(now, minutes, trading, bool(nas_positions), gold_positions[0] if gold_positions else None, None, None, None, nas_bars=bars, nas_bid=bid, nas_pos=nas_position)
     ideas = [
+        london_card,
         shots_idea(now, minutes, bid, bars, nas_position, trading),
         fallback_idea(now, minutes, bid, bars, nas_position, trading),
         hop_idea(now, bid, bars, nas_position),
-        gold["thinking"],
     ]
     balance = float(info.balance) if info is not None else 0.0
     if info is None:
