@@ -823,7 +823,21 @@ bool TryGold(void)
    if(!GoldWindowOpen(eastern) || GoldBlockedForShots(eastern))
       return false;
    if(GoldCount(eastern)>=InpGoldMaxPerDay)
+     {
+      // Say so once a day. This used to be silent, so the viewer could
+      // show a ready setup that was never going to be taken. The flag
+      // survives a reload, so a restart does not repeat the line.
+      int day_key=GoldDayKey(eastern);
+      bool logged=(GlobalVariableCheck("mt5bot.gold.caplog") &&
+                   (int)GlobalVariableGet("mt5bot.gold.caplog")==day_key);
+      if(!logged)
+        {
+         GlobalVariableSet("mt5bot.gold.caplog",day_key);
+         PrintFormat("EA|event=gold|state=daily_cap|count=%d|max=%d",
+                     GoldCount(eastern),InpGoldMaxPerDay);
+        }
       return false;
+     }
    if(g_trades.HasAnyPosition(_Symbol) || g_trades.HasAnyPosition(InpGoldSymbol))
       return false;
    if(!SymbolSelect(InpGoldSymbol,true))

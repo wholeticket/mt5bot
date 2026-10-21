@@ -955,15 +955,33 @@ def hop_idea(now, bid, bars, position):
 
 
 def gold_used(now):
-    key = now.year * 10000 + now.month * 100 + now.day
+    """Gold trades taken today, on the New York day, from deal history.
+
+    The bot keeps its own count in a terminal global variable, but the
+    Python library has no way to read those, and the old code quietly
+    reported 0 forever. Opening gold deals can be read, so count those.
+    Deal times come back on the broker clock, like the bars.
+    """
     try:
-        if not mt5.global_variable_check("mt5bot.gold.day"):
+        tick = mt5.symbol_info_tick(GOLD)
+        if tick is None:
             return 0
-        if int(mt5.global_variable_get("mt5bot.gold.day")) != key:
+        offset = server_offset_hours(tick.time)
+        start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc) - timedelta(days=1)
+        deals = mt5.history_deals_get(start, start + timedelta(days=3))
+        if not deals:
             return 0
-        if not mt5.global_variable_check("mt5bot.gold.count"):
-            return 0
-        return int(mt5.global_variable_get("mt5bot.gold.count"))
+        used = 0
+        for deal in deals:
+            if deal.symbol != GOLD or int(deal.magic) != MAGIC:
+                continue
+            if int(deal.entry) != int(mt5.DEAL_ENTRY_IN):
+                continue
+            real_utc = datetime.fromtimestamp(int(deal.time) - offset * 3600, timezone.utc)
+            opened_ny = (real_utc + timedelta(hours=-4)).replace(tzinfo=None)
+            if opened_ny.date() == now.date():
+                used += 1
+        return used
     except Exception:
         return 0
 
@@ -1172,6 +1190,9 @@ def gold_view(now, minutes, trading, nasdaq_open, position):
         elif now.weekday() not in (0, 3, 4) and 10 * 60 + 50 <= minutes <= 11 * 60:
             state, tone = "Aside", "aside"
             lines.append("Standing aside for the 11:00 Nasdaq trade.")
+        elif gold_used(now) >= 2:
+            state, tone = "Passed", "off"
+            lines.append("Both gold trades for today have been used.")
         elif tick is None or closed is None or len(closed) < 3:
             state, tone = "Waiting", "wait"
             lines.append("Gold prices are not in yet.")
