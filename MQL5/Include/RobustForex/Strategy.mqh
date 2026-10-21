@@ -136,9 +136,19 @@ int IctEasternOffsetSeconds(const datetime gmt)
 
 datetime IctServerToGmt(const datetime server_time)
   {
+   // In MT5 Strategy Tester, TimeGMT() equals TimeCurrent() (raw == 0),
+   // which shifted all bar times by 2-3 hours. FTMO server time is always
+   // New York + 7 hours (UTC+2 in US winter, UTC+3 in US summer).
+   long raw=(long)TimeCurrent()-(long)TimeGMT();
+   if((bool)MQLInfoInteger(MQL_TESTER) || MathAbs(raw)<60)
+     {
+      datetime approx_gmt=(datetime)((long)server_time-2*3600);
+      int eastern_off=IctEasternOffsetSeconds(approx_gmt); // -5*3600 winter, -4*3600 summer
+      long broker_offset=7*3600+eastern_off;               // +2*3600 winter, +3*3600 summer
+      return (datetime)((long)server_time-broker_offset);
+     }
    // The raw difference wobbles by a second. A bar that opens at
    // 10:00:00 would otherwise look like 09:59:59 and the shot would miss.
-   long raw=(long)TimeCurrent()-(long)TimeGMT();
    long hours=(raw>=0 ? (raw+1800)/3600 : (raw-1800)/3600);
    long offset=hours*3600;
    return (datetime)((long)server_time-offset);

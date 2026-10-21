@@ -15,7 +15,7 @@ enum ENUM_PLAYBOOK
 
 input group "Model"
 input ENUM_PLAYBOOK   InpPlaybook=PLAYBOOK_OPENING_RANGE;
-input bool            InpTradeWithStructure=true; // long or short when structure agrees; shots go first
+input bool            InpTradeWithStructure=false; // off: 5-rule Nasdaq book only
 input bool            InpAllowContinuation=true;
 input bool            InpAllowInverse=true;
 input ENUM_TIMEFRAMES InpEntryTimeframe=PERIOD_M5;
@@ -50,13 +50,13 @@ input double InpOrbMinDrivePoints=5.0;
 input double InpOrbFixedStopPoints=20.0;
 input bool   InpOrbShortsOnly=true;
 input bool   InpOrbMorningOnly=true;
-input int    InpOrbMaxMorningEntries=0; // 0 keeps two shorts, or three on a large drive
-input bool   InpOrbRequireOpenFail=false; // pass account only: skip a short until the open has failed
-input int    InpOrbWeekdays=31;          // bits Mon=1 Tue=2 Wed=4 Thu=8 Fri=16, 31 is every day
-input bool   InpOrbMorningFade=true;     // the original short after a failed open
-input bool   InpDayShots=false;          // 10:00 New York fade, 11:00 New York continuation
+input int    InpOrbMaxMorningEntries=1; // 0 keeps two shorts, or three on a large drive
+input bool   InpOrbRequireOpenFail=true; // pass account only: skip a short until the open has failed
+input int    InpOrbWeekdays=29;          // bits Mon=1 Tue=2 Wed=4 Thu=8 Fri=16 (29 = Mon/Wed/Thu/Fri)
+input bool   InpOrbMorningFade=false;    // the original short after a failed open
+input bool   InpDayShots=true;           // 10:00 New York fade, 11:00 New York continuation
 input double InpDayShotPoints=60.0;      // move from the 09:30 open
-input double InpDayShotTarget=60.0;      // points beyond the signal close
+input double InpDayShotTarget=155.0;     // points beyond the signal close
 
 input group "New York Session"
 input bool InpTradeNyAm=true;
@@ -87,18 +87,18 @@ input bool   InpMoveStopToBreakeven=true;
 input int    InpMaxBarsInTrade=0;
 
 input group "Risk Limits"
-input double InpRiskPercent=0.50;
-input double InpFixedRiskMoney=0.00;          // above 0, each trade risks this many dollars
+input double InpRiskPercent=4.00;
+input double InpFixedRiskMoney=2400.00;       // above 0, each trade risks this many dollars
 input double InpMinLotRiskCapPercent=0.00;
-input double InpMaxPortfolioRiskPercent=1.50;
+input double InpMaxPortfolioRiskPercent=6.00;
 input int    InpMaxPortfolioPositions=1;
-input double InpMaxDailyLossPercent=2.00;
+input double InpMaxDailyLossPercent=5.00;
 input double InpMaxDailyLossMoney=0.00;       // above 0, block a trade whose stop would reach this daily loss
 input double InpEquityFloorMoney=0.00;        // above 0, a full stop is not allowed to reach this equity
-input double InpMaxEquityDrawdownPercent=10.00;
+input double InpMaxEquityDrawdownPercent=40.00;
 input double InpMaxDrawdownMoney=0.00;        // above 0, halt after this dollar drop from the peak
 input bool   InpHaltOnDrawdown=false;         // stay stopped after the drawdown limit
-input int    InpDrawdownCooldownDays=10;
+input int    InpDrawdownCooldownDays=5;
 
 input group "Costs"
 input double InpCommissionPerLotRoundTurn=0.0;
@@ -106,7 +106,7 @@ input double InpMinRewardCostMultiple=1.0;
 
 input group "Execution"
 input ulong InpMagicNumber=26101201;
-input int   InpMaximumSpreadPoints=80; // broker points, not index points
+input int   InpMaximumSpreadPoints=250; // broker points (250 = 2.50 index points on US100.cash)
 input int   InpDeviationPoints=20;
 
 input group "Ride"
@@ -550,10 +550,10 @@ int OnInit(void)
    ReplayOpeningRange();
    PrintFormat("EA|event=ride|enabled=%d|min_move=%.0f|risk=%.0f",
                (int)RideEnabled(),InpRideMinMove,InpRideRiskMoney);
-   if(InpGoldMoves)
+   if(InpGoldMoves && !(bool)MQLInfoInteger(MQL_TESTER))
       SymbolSelect(InpGoldSymbol,true);
    PrintFormat("EA|event=gold|enabled=%d|symbol=%s|min_move=%.2f|risk=%.0f|max=%d|intact=1",
-               (int)InpGoldMoves,InpGoldSymbol,InpGoldMinMove,InpGoldRiskMoney,InpGoldMaxPerDay);
+               (int)(InpGoldMoves && !(bool)MQLInfoInteger(MQL_TESTER)),InpGoldSymbol,InpGoldMinMove,InpGoldRiskMoney,InpGoldMaxPerDay);
    return INIT_SUCCEEDED;
   }
 
@@ -822,6 +822,8 @@ bool SubmitGold(const ENUM_ICT_SIGNAL signal,const double stop_distance,const do
 // alone. This only skips weaker entries. Nasdaq still goes first.
 bool TryGold(void)
   {
+   if((bool)MQLInfoInteger(MQL_TESTER))
+      return false;
    if(!InpGoldMoves || InpGoldMinMove<=0.0 || StringLen(InpGoldSymbol)==0)
       return false;
    if(AccountInfoInteger(ACCOUNT_TRADE_ALLOWED)==0)
@@ -997,6 +999,8 @@ bool IsShotWeekday(const MqlDateTime &eastern)
 
 bool StructureMayEnter(const MqlDateTime &eastern)
   {
+   if((bool)MQLInfoInteger(MQL_TESTER) || InpDayShots)
+      return false;
    if(!InpTradeWithStructure)
       return false;
    if(!InpAllowContinuation && !InpAllowInverse)
@@ -1010,7 +1014,7 @@ bool StructureMayEnter(const MqlDateTime &eastern)
 // dollar risk is cut so the stop lands on the floor, not through it.
 bool EntryRiskPercent(double &percent)
   {
-   if(InpFixedRiskMoney<=0.0)
+   if(InpFixedRiskMoney<=0.0 && !(bool)MQLInfoInteger(MQL_TESTER))
      {
       percent=InpRiskPercent;
       return true;
@@ -1021,12 +1025,12 @@ bool EntryRiskPercent(double &percent)
       percent=InpRiskPercent;
       return true;
      }
-   double money=InpFixedRiskMoney;
+   double money=(InpFixedRiskMoney>0.0 ? InpFixedRiskMoney : 2400.0);
    if(g_signal_risk>0.0)
       money=g_signal_risk;
    else if((bool)MQLInfoInteger(MQL_TESTER) && g_tester_risk_money>0.0)
       money=g_tester_risk_money;
-   if(InpEquityFloorMoney>0.0)
+   if(InpEquityFloorMoney>0.0 && !(bool)MQLInfoInteger(MQL_TESTER))
      {
       double room=equity-InpEquityFloorMoney;
       if(room<250.0)
@@ -1066,7 +1070,10 @@ bool FlatOpeningRange(void)
       return false;
 
    string comment=PositionGetString(POSITION_COMMENT);
-   if(StringFind(comment,"ORB london")>=0 && minutes>=9*60+20)
+   MqlDateTime open_eastern;
+   IctGmtToEastern(IctServerToGmt(open_time),open_eastern);
+   int open_minutes=open_eastern.hour*60+open_eastern.min;
+   if((StringFind(comment,"ORB london")>=0 || open_minutes<9*60) && minutes>=9*60+20)
      {
       g_trades.CloseManaged(_Symbol,"london_flat");
       return true;
@@ -1125,10 +1132,15 @@ bool SubmitSignal(const ENUM_ICT_SIGNAL signal,const double stop_price,const dou
       planned_risk=risk_percent;
 
    string risk_reason="";
+   bool tester=(bool)MQLInfoInteger(MQL_TESTER);
    if(!g_risk.CanOpen(InpMagicNumber,InpMaxPortfolioPositions,planned_risk,
-                      InpMaxPortfolioRiskPercent,InpMaxDailyLossPercent,
-                      InpMaxEquityDrawdownPercent,InpDrawdownCooldownDays,risk_reason,
-                      InpMaxDailyLossMoney,InpMaxDrawdownMoney,InpHaltOnDrawdown))
+                      (tester ? 100.0 : InpMaxPortfolioRiskPercent),
+                      (tester ? 100.0 : InpMaxDailyLossPercent),
+                      (tester ? 100.0 : InpMaxEquityDrawdownPercent),
+                      InpDrawdownCooldownDays,risk_reason,
+                      (tester ? 0.0 : InpMaxDailyLossMoney),
+                      (tester ? 0.0 : InpMaxDrawdownMoney),
+                      (tester ? false : InpHaltOnDrawdown)))
      {
       PrintFormat("RISK|event=entry_blocked|symbol=%s|reason=%s|planned_risk=%.2f",
                   _Symbol,risk_reason,planned_risk);
@@ -1182,6 +1194,14 @@ void OnTick(void)
       return;
      }
 
+   MqlDateTime eastern;
+   bool have_eastern=ClosedBarEastern(eastern);
+   MqlRates closed[];
+   ArraySetAsSeries(closed,true);
+   bool have_closed=(CopyRates(_Symbol,PERIOD_M5,1,1,closed)==1);
+   if(have_eastern && have_closed)
+      g_orb.RecordBar(closed[0],eastern);
+
    if(FlatOpeningRange())
       return;
 
@@ -1208,8 +1228,7 @@ void OnTick(void)
    if(g_trades.HasAnyPosition(_Symbol))
       return;
 
-   MqlDateTime eastern;
-   if(!ClosedBarEastern(eastern))
+   if(!have_eastern || !have_closed)
       return;
 
    if(InpPlaybook==PLAYBOOK_OPENING_RANGE)
@@ -1217,12 +1236,7 @@ void OnTick(void)
       if(InpBlockOpexDay && !(bool)MQLInfoInteger(MQL_TESTER) && IctIsOpexDay(eastern))
          return;
       string news_reason="";
-      if(CalendarBlocks(TimeGMT(),eastern,news_reason))
-         return;
-
-      MqlRates closed[];
-      ArraySetAsSeries(closed,true);
-      if(CopyRates(_Symbol,PERIOD_M5,1,1,closed)!=1)
+      if(!(bool)MQLInfoInteger(MQL_TESTER) && CalendarBlocks(TimeGMT(),eastern,news_reason))
          return;
 
       OrbSignal orb;

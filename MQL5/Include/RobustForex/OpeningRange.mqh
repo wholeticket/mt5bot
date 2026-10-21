@@ -263,6 +263,35 @@ public:
    void SetReplay(const bool replay) { m_replay=replay; }
    void MarkDailyDone(void)          { m_daily_done=true; }
 
+   // Record session anchor opens (03:00, 09:30, 13:00 NY) even when a trade is
+   // currently open, so a morning trade that closes after 13:00 never causes
+   // the 14:30 afternoon drive (or 10:00/11:00 shots) to miss its anchor open.
+   void RecordBar(const MqlRates &bar,const MqlDateTime &eastern)
+     {
+      int day=IctDayKey(eastern);
+      if(day!=m_day)
+         ResetDay(day);
+      int dow=eastern.day_of_week;
+      if(dow<1 || dow>5)
+         return;
+      int bar_min=eastern.hour*60+eastern.min;
+      if(bar_min==3*60)
+        {
+         m_london_open=bar.open;
+         m_london_seen=true;
+        }
+      else if(bar_min==9*60+30)
+        {
+         m_shot_open=bar.open;
+         m_shot_seen=true;
+        }
+      else if(bar_min==13*60)
+        {
+         m_pm_drive_open=bar.open;
+         m_pm_drive_seen=true;
+        }
+     }
+
    void ShotState(double &open_price,bool &seen,bool &fade_done,bool &with_done,bool &daily_done) const
      {
       open_price=m_shot_open;
