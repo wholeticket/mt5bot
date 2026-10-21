@@ -1,6 +1,6 @@
 #property copyright "RobustForexEA"
-#property version   "6.30"
-#property description "NY & London Nasdaq EA with 2-stage smart runner management."
+#property version   "6.31"
+#property description "NY & London Nasdaq EA with 2-stage smart runner + US Holiday Ban."
 
 #include <RobustForex/Strategy.mqh>
 #include <RobustForex/OpeningRange.mqh>
@@ -78,6 +78,7 @@ input int  InpNewsMinutesBefore=10;
 input int  InpNewsMinutesAfter=10;
 input bool InpBlockFomcDay=true;
 input bool InpBlockOpexDay=true;
+input bool InpBlockUsHolidays=true; // skip US NYSE/Nasdaq bank holidays
 
 input group "Position Management"
 input bool   InpUsePartialTakeProfit=true;
@@ -518,6 +519,7 @@ int OnInit(void)
    orb.london_max_move=30.0;
    orb.london_stop=15.0;
    orb.london_target=90.0;
+   orb.skip_us_holidays=InpBlockUsHolidays;
    if((bool)MQLInfoInteger(MQL_TESTER))
      {
       // 10:00 fade on Thursday (8); 11:00 trend shot on Mon/Wed/Thu/Fri (29).
@@ -546,9 +548,9 @@ int OnInit(void)
    PrintFormat("EA|event=initialized|bot=%s|symbol=%s|entry=%s|structure=%s|bias=%s|magic=%I64u",
                BotLabel(),_Symbol,EnumToString(InpEntryTimeframe),EnumToString(InpStructureTimeframe),
                EnumToString(InpBiasTimeframe),InpMagicNumber);
-   PrintFormat("EA|event=book|london=1|lon_stop=15|lon_target=90|daily=%d|daily_days=%d|daily_stop=%.0f|daily_target=%.0f|daily_risk=660|shots=%d|weekdays=%d|fade10=%d|stop=%.0f|target=%.0f|risk=%.0f|pm1430=1|partial=%.2f|cushion=%.2f|lock4R=1.5R",
+   PrintFormat("EA|event=book|london=1|lon_stop=15|lon_target=90|daily=%d|daily_days=%d|daily_stop=%.0f|daily_target=%.0f|daily_risk=660|shots=%d|weekdays=%d|fade10=%d|stop=%.0f|target=%.0f|risk=%.0f|pm1430=1|partial=%.2f|cushion=%.2f|lock4R=1.5R|us_holiday_ban=%d",
                (int)orb.daily_on,orb.daily_weekdays,orb.daily_stop,orb.daily_target,(int)orb.day_shots,orb.weekdays,
-               orb.fade10_weekdays,orb.fixed_stop,orb.day_target,InpFixedRiskMoney,InpPartialFraction,InpBreakevenOffsetR);
+               orb.fade10_weekdays,orb.fixed_stop,orb.day_target,InpFixedRiskMoney,InpPartialFraction,InpBreakevenOffsetR,(int)orb.skip_us_holidays);
    PrintFormat("EA|event=structure|enabled=%d|continuation=%d|inverse=%d",
                (int)InpTradeWithStructure,(int)InpAllowContinuation,(int)InpAllowInverse);
    ReplayOpeningRange();
@@ -982,6 +984,7 @@ void ShowBotLabel(void)
               StringFormat("Mon/Wed/Thu/Fri 11:00 NY go with a %.0f-point move ($1,100, stop 20, target 155)",InpDayShotPoints)+"\n"+
               "Mon/Tue/Wed 11:00 NY fade a 10..60 point range move ($660, stop 20, target 120)\n"+
               "Wed/Thu/Fri 14:30 NY go with an 80-point afternoon drive from 13:00 ($660, stop 20, target 100)\n"+
+              "US Market Holidays: Banned (NYSE/Nasdaq holidays skipped)\n"+
               days+structure);
       return;
      }

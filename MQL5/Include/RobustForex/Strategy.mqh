@@ -186,6 +186,79 @@ bool IctIsOpexDay(const MqlDateTime &eastern)
            eastern.day==IctNthWeekday(eastern.year,eastern.mon,5,3));
   }
 
+// Gregorian Easter Sunday (Meeus/Jones/Butcher) to derive Good Friday.
+void IctEasterSunday(const int year,int &easter_month,int &easter_day)
+  {
+   int a=year%19;
+   int b=year/100;
+   int c=year%100;
+   int d=b/4;
+   int e=b%4;
+   int f=(b+8)/25;
+   int g=(b-f+1)/3;
+   int h=(19*a+b-d-g+15)%30;
+   int i=c/4;
+   int k=c%4;
+   int l=(32+2*e+2*i-h-k)%7;
+   int m=(a+11*h+22*l)/451;
+   easter_month=(h+l-7*m+114)/31;
+   easter_day=((h+l-7*m+114)%31)+1;
+  }
+
+// US NYSE/Nasdaq market holidays (plus Black Friday & Christmas Eve thin sessions).
+bool IctIsUsMarketHoliday(const MqlDateTime &eastern)
+  {
+   int y=eastern.year;
+   int m=eastern.mon;
+   int d=eastern.day;
+   int dow=IctWeekdaySunday0(y,m,d); // 0=Sun .. 6=Sat
+
+   // 1. New Year's Day (Jan 1, or Mon Jan 2 when Jan 1 is Sunday)
+   if(m==1 && (d==1 || (d==2 && dow==1)))
+      return true;
+   // 2. Martin Luther King Jr. Day (3rd Monday of January)
+   if(m==1 && d==IctNthWeekday(y,1,1,3))
+      return true;
+   // 3. Presidents' Day (3rd Monday of February)
+   if(m==2 && d==IctNthWeekday(y,2,1,3))
+      return true;
+   // 4. Good Friday (2 days before Easter Sunday)
+   if(m==3 || m==4)
+     {
+      int em=0,ed=0;
+      IctEasterSunday(y,em,ed);
+      datetime gf=IctCivilToUtc(y,em,ed,12,0)-2*86400;
+      MqlDateTime gf_parts;
+      TimeToStruct(gf,gf_parts);
+      if(m==gf_parts.mon && d==gf_parts.day)
+         return true;
+     }
+   // 5. Memorial Day (Last Monday of May)
+   if(m==5 && dow==1 && d>=25)
+      return true;
+   // 6. Juneteenth (Jun 19, Fri Jun 18 if Sat, Mon Jun 20 if Sun)
+   if(m==6 && (d==19 || (d==18 && dow==5) || (d==20 && dow==1)))
+      return true;
+   // 7. Independence Day (Jul 4, Fri Jul 3 if Sat, Mon Jul 5 if Sun)
+   if(m==7 && (d==4 || (d==3 && dow==5) || (d==5 && dow==1)))
+      return true;
+   // 8. Labor Day (1st Monday of September)
+   if(m==9 && d==IctNthWeekday(y,9,1,1))
+      return true;
+   // 9. Thanksgiving (4th Thursday of November) & Black Friday (day after)
+   if(m==11)
+     {
+      int tg=IctNthWeekday(y,11,4,4);
+      if(d==tg || d==tg+1)
+         return true;
+     }
+   // 10. Christmas Eve & Christmas Day (Dec 24, Dec 25, or Mon Dec 26 when Dec 25 is Sun)
+   if(m==12 && (d==24 || d==25 || (d==26 && dow==1)))
+      return true;
+
+   return false;
+  }
+
 bool IctMinutesInside(const MqlDateTime &eastern,
                       const int start_hour,const int start_minute,
                       const int end_hour,const int end_minute)

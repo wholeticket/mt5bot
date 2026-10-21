@@ -346,10 +346,10 @@ PAGE = """<!DOCTYPE html>
 
 <header>
   <div class="brand">
-    <span class="badge-bot">PASS BOT v6.30</span>
+    <span class="badge-bot">PASS BOT v6.31</span>
     <div>
       <div class="symbol-tag">US100.cash (Nasdaq 100) · M5</div>
-      <div class="sub-tag">5-Rule Book · 2-Stage Smart Runner (40% @ +1R &amp; -0.60R Cushion · +4R Locks +1.5R)</div>
+      <div class="sub-tag">5-Rule Book · 2-Stage Smart Runner (40% @ +1R &amp; -0.60R Cushion · +4R Locks +1.5R) · US Holidays Banned</div>
     </div>
   </div>
   <div class="clocks">
@@ -363,7 +363,7 @@ PAGE = """<!DOCTYPE html>
 
 <div class="banner">
   <div class="banner-text" id="board">Connecting to MetaTrader 5...</div>
-  <div class="runner-pill">Shot Risk: <b>$1,100</b> (Full TP <b>+$5,555</b>) · Half-Shot Risk: <b>$660</b> (Full TP <b>+$2,640</b>)</div>
+  <div class="runner-pill">Shot Risk: <b>$1,100</b> (Full TP <b>+$5,555</b>) · Half-Shot Risk: <b>$660</b> (Full TP <b>+$2,640</b>) · <a href="/report.pdf" target="_blank" style="color:#58a6ff;font-weight:700;text-decoration:none">Download 2026 PDF Report</a> · <a href="/report" target="_blank" style="color:#3fb950;font-weight:700;text-decoration:none">Web Report</a></div>
 </div>
 
 <div class="section-head">
@@ -1165,6 +1165,25 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if self.path.startswith("/report.pdf"):
+            pdf_path = Path(__file__).with_name("US100_2026_Backtest_Report.pdf")
+            if pdf_path.exists():
+                body = pdf_path.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/pdf")
+                self.send_header("Content-Disposition", 'inline; filename="US100_2026_Backtest_Report.pdf"')
+                self.end_headers()
+                self.wfile.write(body)
+                return
+        if self.path.startswith("/report"):
+            html_path = Path(__file__).with_name("US100_2026_Backtest_Report.html")
+            if html_path.exists():
+                body = html_path.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(body)
+                return
         payload = PAGE.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")

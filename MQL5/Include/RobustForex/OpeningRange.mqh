@@ -48,6 +48,7 @@ struct OrbSettings
    double london_max_move;     // 30.0 points max
    double london_stop;         // 15.0 points stop
    double london_target;       // 90.0 points target (6R)
+   bool   skip_us_holidays;    // skip US NYSE/Nasdaq bank holidays
   };
 
 struct OrbSignal
@@ -631,6 +632,11 @@ public:
       int dow=eastern.day_of_week;
       if(dow<1 || dow>5)
          return ICT_SIGNAL_NONE;
+      if(m_cfg.skip_us_holidays && IctIsUsMarketHoliday(eastern))
+        {
+         out.reason="us_holiday";
+         return ICT_SIGNAL_NONE;
+        }
       bool shot_day=true;
       if(m_cfg.weekdays>0 && m_cfg.weekdays<31)
          shot_day=((m_cfg.weekdays&(1<<(dow-1)))!=0);
