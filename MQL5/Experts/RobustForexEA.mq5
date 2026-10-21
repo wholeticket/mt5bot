@@ -80,21 +80,21 @@ input bool InpBlockFomcDay=true;
 input bool InpBlockOpexDay=true;
 
 input group "Position Management"
-input bool   InpUsePartialTakeProfit=false;
+input bool   InpUsePartialTakeProfit=true;
 input double InpPartialFraction=0.50;
 input double InpPartialRewardRisk=1.0;
 input bool   InpMoveStopToBreakeven=true;
 input int    InpMaxBarsInTrade=0;
 
 input group "Risk Limits"
-input double InpRiskPercent=4.00;
-input double InpFixedRiskMoney=2400.00;       // above 0, each trade risks this many dollars
+input double InpRiskPercent=1.00;
+input double InpFixedRiskMoney=1000.00;       // above 0, each trade risks this many dollars ($1,000 shot / $600 half-shot)
 input double InpMinLotRiskCapPercent=0.00;
 input double InpMaxPortfolioRiskPercent=6.00;
 input int    InpMaxPortfolioPositions=1;
-input double InpMaxDailyLossPercent=5.00;
-input double InpMaxDailyLossMoney=0.00;       // above 0, block a trade whose stop would reach this daily loss
-input double InpEquityFloorMoney=0.00;        // above 0, a full stop is not allowed to reach this equity
+input double InpMaxDailyLossPercent=4.50;
+input double InpMaxDailyLossMoney=4200.00;    // FTMO $100k daily loss buffer ($5,000 hard limit)
+input double InpEquityFloorMoney=91000.00;    // FTMO $100k static floor buffer ($90,000 hard limit)
 input double InpMaxEquityDrawdownPercent=40.00;
 input double InpMaxDrawdownMoney=0.00;        // above 0, halt after this dollar drop from the peak
 input bool   InpHaltOnDrawdown=false;         // stay stopped after the drawdown limit
@@ -523,7 +523,7 @@ int OnInit(void)
       orb.fixed_stop=20.0;
       orb.day_target=155.0;
       orb.daily_on=true;
-      g_tester_risk_money=0.0;
+      g_tester_risk_money=1000.0;
       g_tester_target=orb.day_target;
      }
    else
@@ -542,7 +542,7 @@ int OnInit(void)
    PrintFormat("EA|event=initialized|bot=%s|symbol=%s|entry=%s|structure=%s|bias=%s|magic=%I64u",
                BotLabel(),_Symbol,EnumToString(InpEntryTimeframe),EnumToString(InpStructureTimeframe),
                EnumToString(InpBiasTimeframe),InpMagicNumber);
-   PrintFormat("EA|event=book|london=1|lon_stop=15|lon_target=90|daily=%d|daily_stop=%.0f|daily_target=%.0f|daily_risk=1400|shots=%d|weekdays=%d|fade10=%d|stop=%.0f|target=%.0f|risk=%.0f|pm1430=1",
+   PrintFormat("EA|event=book|london=1|lon_stop=15|lon_target=90|daily=%d|daily_stop=%.0f|daily_target=%.0f|daily_risk=600|shots=%d|weekdays=%d|fade10=%d|stop=%.0f|target=%.0f|risk=%.0f|pm1430=1|partial50_1R=1",
                (int)orb.daily_on,orb.daily_stop,orb.daily_target,(int)orb.day_shots,orb.weekdays,
                orb.fade10_weekdays,orb.fixed_stop,orb.day_target,InpFixedRiskMoney);
    PrintFormat("EA|event=structure|enabled=%d|continuation=%d|inverse=%d",
@@ -972,12 +972,12 @@ void ShowBotLabel(void)
       structure+="\nGold joins only while the move is still going, and stands aside for the Nasdaq shots";
    if(InpDayShots && !InpOrbMorningFade)
      {
-      Comment(BotLabel()+"\n"+risk+"\n"+
-              "All weekdays 08:30 UK (03:30 NY) fade a 5..30 point London move ($1,400, stop 15, target 90)\n"+
-              StringFormat("Thu 10:00 NY fade a %.0f-point move ($2,400, stop 20, target 155)",InpDayShotPoints)+"\n"+
-              StringFormat("Mon/Wed/Thu/Fri 11:00 NY go with a %.0f-point move ($2,400, stop 20, target 155)",InpDayShotPoints)+"\n"+
-              "All weekdays 11:00 NY fade a 10..60 point range move ($1,400, stop 20, target 120)\n"+
-              "Wed/Thu/Fri 14:30 NY go with an 80-point afternoon drive from 13:00 ($1,400, stop 20, target 100)\n"+
+      Comment(BotLabel()+"\n"+risk+" (50% off at +1R & stop to breakeven)\n"+
+              "All weekdays 08:30 UK (03:30 NY) fade a 5..30 point London move ($600, stop 15, target 90)\n"+
+              StringFormat("Thu 10:00 NY fade a %.0f-point move ($1,000, stop 20, target 155)",InpDayShotPoints)+"\n"+
+              StringFormat("Mon/Wed/Thu/Fri 11:00 NY go with a %.0f-point move ($1,000, stop 20, target 155)",InpDayShotPoints)+"\n"+
+              "All weekdays 11:00 NY fade a 10..60 point range move ($600, stop 20, target 120)\n"+
+              "Wed/Thu/Fri 14:30 NY go with an 80-point afternoon drive from 13:00 ($600, stop 20, target 100)\n"+
               days+structure);
       return;
      }
@@ -1025,11 +1025,11 @@ bool EntryRiskPercent(double &percent)
       percent=InpRiskPercent;
       return true;
      }
-   double money=(InpFixedRiskMoney>0.0 ? InpFixedRiskMoney : 2400.0);
+   double money=(InpFixedRiskMoney>0.0 ? InpFixedRiskMoney : 1000.0);
+   if((bool)MQLInfoInteger(MQL_TESTER) && g_tester_risk_money>0.0)
+      money=g_tester_risk_money;
    if(g_signal_risk>0.0)
       money=g_signal_risk;
-   else if((bool)MQLInfoInteger(MQL_TESTER) && g_tester_risk_money>0.0)
-      money=g_tester_risk_money;
    if(InpEquityFloorMoney>0.0 && !(bool)MQLInfoInteger(MQL_TESTER))
      {
       double room=equity-InpEquityFloorMoney;
@@ -1180,7 +1180,7 @@ void OnTick(void)
 
    if(g_trades.HasManagedPosition(_Symbol))
       g_trades.Manage(_Symbol,
-                      ((bool)MQLInfoInteger(MQL_TESTER) ? false : InpUsePartialTakeProfit),
+                      ((bool)MQLInfoInteger(MQL_TESTER) ? true : InpUsePartialTakeProfit),
                       InpPartialFraction,InpPartialRewardRisk,InpMoveStopToBreakeven);
 
    MqlDateTime gold_clock;
@@ -1247,7 +1247,7 @@ void OnTick(void)
                         (orb.session=="am" ? "ORB am" :
                         (orb.session=="day" ? "ORB day" :
                         (orb.session=="daily" ? "ORB daily" : "ORB pm"))));
-         g_signal_risk=((orb.session=="daily" || orb.session=="london") ? 1400.0 : 0.0);
+         g_signal_risk=((orb.session=="daily" || orb.session=="london") ? 600.0 : 1000.0);
          shot_sent=SubmitSignal(orb.signal,orb.stop_price,orb.stop_distance,orb.target,orb.session,comment);
          g_signal_risk=0.0;
          if(shot_sent && orb.session=="daily" && eastern.hour*60+eastern.min<11*60)
