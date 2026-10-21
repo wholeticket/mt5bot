@@ -80,7 +80,7 @@ input bool InpBlockFomcDay=true;
 input bool InpBlockOpexDay=true;
 
 input group "Position Management"
-input bool   InpUsePartialTakeProfit=true;
+input bool   InpUsePartialTakeProfit=false;
 input double InpPartialFraction=0.50;
 input double InpPartialRewardRisk=1.0;
 input bool   InpMoveStopToBreakeven=true;
@@ -115,7 +115,7 @@ input double InpRideMinMove=12.0;    // points the last half hour already travel
 input double InpRideRiskMoney=400.0; // dollars at risk on a hop; shots keep their own risk
 
 input group "Gold"
-input bool   InpGoldMoves=true;          // buy or sell gold when a move is already going
+input bool   InpGoldMoves=false;         // gold scalping disabled after 2026 study
 input string InpGoldSymbol="XAUUSD";     // FTMO gold spot
 input double InpGoldMinMove=1.20;        // dollars in the last 3 minutes
 input double InpGoldRiskMoney=250.0;     // dollars at risk; Nasdaq shots keep their own risk
@@ -496,17 +496,23 @@ int OnInit(void)
    orb.max_morning_entries=InpOrbMaxMorningEntries;
    orb.require_open_fail=InpOrbRequireOpenFail;
    orb.day_move=InpDayShotPoints;
+   orb.fade10_weekdays=8;      // Thursday only for 10:00 fade
    orb.daily_on=true;
    orb.daily_minute=11*60;
-   orb.daily_dir=1;
-   orb.daily_min_move=0.0;
-   orb.daily_stop=30.0;
+   orb.daily_dir=-1;           // fade 10..60 pt range mornings at 11:00
+   orb.daily_min_move=10.0;
+   orb.daily_max_move=60.0;
+   orb.daily_stop=20.0;
    orb.daily_target=120.0;
+   orb.pm_drive_on=true;       // 14:30 continuation off 13:00 open (Wed/Thu/Fri)
+   orb.pm_drive_weekdays=28;
+   orb.pm_drive_move=80.0;
+   orb.pm_drive_stop=20.0;
+   orb.pm_drive_target=100.0;
    if((bool)MQLInfoInteger(MQL_TESTER))
      {
-      // Shots stay Monday, Thursday, Friday. The 11:00 trade fills
-      // every weekday the shot does not take.
-      orb.weekdays=25;
+      // 10:00 fade on Thursday (8); 11:00 trend shot on Mon/Wed/Thu/Fri (29).
+      orb.weekdays=29;
       orb.morning_fade=false;
       orb.day_shots=true;
       orb.fixed_stop=20.0;
@@ -517,7 +523,7 @@ int OnInit(void)
      }
    else
      {
-      orb.weekdays=InpOrbWeekdays;
+      orb.weekdays=(InpOrbWeekdays==25 ? 29 : InpOrbWeekdays);
       orb.morning_fade=InpOrbMorningFade;
       orb.day_shots=InpDayShots;
       orb.fixed_stop=InpOrbFixedStopPoints;
@@ -531,9 +537,9 @@ int OnInit(void)
    PrintFormat("EA|event=initialized|bot=%s|symbol=%s|entry=%s|structure=%s|bias=%s|magic=%I64u",
                BotLabel(),_Symbol,EnumToString(InpEntryTimeframe),EnumToString(InpStructureTimeframe),
                EnumToString(InpBiasTimeframe),InpMagicNumber);
-   PrintFormat("EA|event=book|daily=%d|daily_stop=%.0f|daily_target=%.0f|shots=%d|weekdays=%d|stop=%.0f|target=%.0f|risk=%.0f|early=1",
+   PrintFormat("EA|event=book|daily=%d|daily_stop=%.0f|daily_target=%.0f|daily_risk=1400|shots=%d|weekdays=%d|fade10=%d|stop=%.0f|target=%.0f|risk=%.0f|pm1430=1",
                (int)orb.daily_on,orb.daily_stop,orb.daily_target,(int)orb.day_shots,orb.weekdays,
-               orb.fixed_stop,orb.day_target,InpFixedRiskMoney);
+               orb.fade10_weekdays,orb.fixed_stop,orb.day_target,InpFixedRiskMoney);
    PrintFormat("EA|event=structure|enabled=%d|continuation=%d|inverse=%d",
                (int)InpTradeWithStructure,(int)InpAllowContinuation,(int)InpAllowInverse);
    ReplayOpeningRange();
@@ -960,11 +966,10 @@ void ShowBotLabel(void)
    if(InpDayShots && !InpOrbMorningFade)
      {
       Comment(BotLabel()+"\n"+risk+"\n"+
-              StringFormat("fade a %.0f-point move at 10:00 New York",InpDayShotPoints)+"\n"+
-              StringFormat("go with a %.0f-point move at 11:00 New York",InpDayShotPoints)+"\n"+
-              "if that shot is not taken, one 11:00 trade, stop 30, target 120, $250\n"+
-              "on other days, take that trade early once 60 points is there and half has not been given back\n"+
-              "afternoon buy on a 20-point drop, Wed Thu Fri\n"+
+              StringFormat("Thu 10:00 fade a %.0f-point move ($2,400, stop 20, target 155)",InpDayShotPoints)+"\n"+
+              StringFormat("Mon/Wed/Thu/Fri 11:00 go with a %.0f-point move ($2,400, stop 20, target 155)",InpDayShotPoints)+"\n"+
+              "All weekdays 11:00 fade a 10..60 point range move ($1,400, stop 20, target 120)\n"+
+              "Wed/Thu/Fri 14:30 go with an 80-point afternoon drive from 13:00 ($1,400, stop 20, target 100)\n"+
               days+structure);
       return;
      }
@@ -1216,7 +1221,7 @@ void OnTick(void)
          string comment=(orb.session=="am" ? "ORB am" :
                         (orb.session=="day" ? "ORB day" :
                         (orb.session=="daily" ? "ORB daily" : "ORB pm")));
-         g_signal_risk=(orb.session=="daily" ? 250.0 : 0.0);
+         g_signal_risk=(orb.session=="daily" ? 1400.0 : 0.0);
          shot_sent=SubmitSignal(orb.signal,orb.stop_price,orb.stop_distance,orb.target,orb.session,comment);
          g_signal_risk=0.0;
          if(shot_sent && orb.session=="daily" && eastern.hour*60+eastern.min<11*60)

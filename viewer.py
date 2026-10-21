@@ -29,9 +29,14 @@ SHOT_POINTS = 60.0
 SHOT_STOP = 20.0
 SHOT_TARGET = 155.0
 SHOT_RISK = 2400.0
-FALLBACK_STOP = 30.0
+FALLBACK_MIN = 10.0
+FALLBACK_STOP = 20.0
 FALLBACK_TARGET = 120.0
-FALLBACK_RISK = 250.0
+FALLBACK_RISK = 1400.0
+PM_DRIVE_POINTS = 80.0
+PM_DRIVE_STOP = 20.0
+PM_DRIVE_TARGET = 100.0
+PM_DRIVE_RISK = 1400.0
 RIDE_RISK = 400.0
 GOLD = "XAUUSD"
 GOLD_MIN = 1.20
@@ -442,28 +447,38 @@ def ride_order(bars, bid, ask):
     return ticket, f"{word} the ride. The last half hour already moved {net:+.1f}."
 
 
-def wanted_order(move, minutes, bars, bid, ask, shot_day):
+def wanted_order(move, minutes, bars, bid, ask, shot_day, now=None):
+    wd = now.weekday() if now is not None else 0
     if move is None:
         if shot_day:
             return None, "Waiting for the 09:30 New York open."
-        return None, "Waiting for the 09:30 open. Today is the one 11:00 trade."
-    if shot_day and minutes < 10 * 60:
+        return None, "Waiting for the 09:30 open. Today has the 11:00 range-fade ($1,400)."
+    if wd == 3 and minutes < 10 * 60:
         if abs(move) < SHOT_POINTS:
-            return None, f"10:00 fade. The open has moved {move:+.1f}. It needs 60."
+            return None, f"Thursday 10:00 fade. The open has moved {move:+.1f}. It needs 60."
         side = "sell" if move > 0 else "buy"
         word = "Sell" if side == "sell" else "Buy"
-        return order_from(side, bid, ask, SHOT_STOP, SHOT_TARGET, SHOT_RISK, "ORB am"), f"{word} the 10:00 fade."
+        return order_from(side, bid, ask, SHOT_STOP, SHOT_TARGET, SHOT_RISK, "ORB day"), f"{word} the Thursday 10:00 fade ($2,400)."
     if minutes < 11 * 60:
         if shot_day and abs(move) >= SHOT_POINTS:
             side = "buy" if move > 0 else "sell"
             word = "Buy" if side == "buy" else "Sell"
-            return order_from(side, bid, ask, SHOT_STOP, SHOT_TARGET, SHOT_RISK, "ORB day"), f"{word} the 11:00 shot, with the move."
-        if abs(move) >= 0.5:
-            side = "buy" if move > 0 else "sell"
+            return order_from(side, bid, ask, SHOT_STOP, SHOT_TARGET, SHOT_RISK, "ORB day"), f"{word} the 11:00 trend shot ($2,400)."
+        if FALLBACK_MIN <= abs(move) < SHOT_POINTS:
+            side = "sell" if move > 0 else "buy"
             word = "Buy" if side == "buy" else "Sell"
-            return order_from(side, bid, ask, FALLBACK_STOP, FALLBACK_TARGET, FALLBACK_RISK, "ORB daily"), f"{word} the 11:00 trade. Stop 30, target 120, $250."
-        return None, "11:00 trade is off. The morning is flat."
-    return None, "That was the trade for today. The hop after 11:00 is off."
+            return order_from(side, bid, ask, FALLBACK_STOP, FALLBACK_TARGET, FALLBACK_RISK, "ORB daily"), f"{word} the 11:00 range-fade. Stop 20, target 120, $1,400."
+        return None, "11:00 trade is waiting for at least a 10-point move from 09:30."
+    if wd in (2, 3, 4) and 13 * 60 <= minutes < 14 * 60 + 35:
+        op13 = open_1300(bars)
+        if op13 is not None:
+            mv_pm = bid - op13
+            if abs(mv_pm) >= PM_DRIVE_POINTS:
+                side = "buy" if mv_pm > 0 else "sell"
+                word = "Buy" if side == "buy" else "Sell"
+                return order_from(side, bid, ask, PM_DRIVE_STOP, PM_DRIVE_TARGET, PM_DRIVE_RISK, "ORB daily"), f"{word} the 14:30 afternoon drive ({mv_pm:+.1f} from 13:00, $1,400)."
+            return None, f"Watching 14:30 afternoon drive: {mv_pm:+.1f} from 13:00 (needs 80 pts)."
+    return None, "Morning window complete. Watching 14:30 afternoon drive (Wed/Thu/Fri) if flat."
 
 
 def position_ticket(position, bid, ask):
@@ -563,12 +578,20 @@ def day_name(now):
 
 
 def next_shot_day(now):
-    ahead = {1: "Thursday", 2: "Thursday", 5: "Monday", 6: "Monday"}
+    ahead = {1: "Wednesday", 5: "Monday", 6: "Monday"}
     return ahead.get(now.weekday(), "Monday")
 
 
 def shot_day(now):
-    return now.weekday() in (0, 3, 4)
+    return now.weekday() in (0, 2, 3, 4)
+
+
+def fade10_day(now):
+    return now.weekday() == 3
+
+
+def pm_drive_day(now):
+    return now.weekday() in (2, 3, 4)
 
 
 def clock_left(now, target_minute):
@@ -600,6 +623,13 @@ def price_text(value):
 def open_930(bars):
     for bar in bars:
         if bar["t"] == "09:30":
+            return bar["o"]
+    return None
+
+
+def open_1300(bars):
+    for bar in bars:
+        if bar["t"] == "13:00":
             return bar["o"]
     return None
 
@@ -724,19 +754,19 @@ def shots_idea(now, minutes, bid, bars, position, trading):
             "shots", "Nasdaq shots", "In a trade", side,
             f"{word} {float(position.volume):.2f} lots from {price_text(float(position.price_open))}.",
             facts,
-            ["Red line is the stop. Green line is the target."],
+            ["Red line is the stop. Green line is the target. Full hold ($2,400 risk)."],
         )
     if not shot_day(now):
         return idea(
             "shots", "Nasdaq shots", "Standing aside", "",
-            f"Today is {day_name(now)}. Shots run on Monday, Thursday, and Friday.",
+            f"Today is {day_name(now)}. Trend shots run on Mon, Wed, Thu, and Fri.",
             [
                 {"label": "Bid", "value": price_text(bid)},
                 {"label": "Needs", "value": "60 points"},
                 {"label": "Next", "value": next_shot_day(now)},
                 {"label": "From the open", "value": "—" if move is None else f"{move:+.1f}"},
             ],
-            ["At 10:00 a 60 point move is faded. At 11:00 the same move is taken with it."],
+            ["Thu 10:00 fades a 60+ pt move. Mon/Wed/Thu/Fri 11:00 rides a 60+ pt move."],
         )
     if minutes >= 11 * 60 + 5:
         return idea(
@@ -748,9 +778,9 @@ def shots_idea(now, minutes, bid, bars, position, trading):
                 {"label": "Needed", "value": "60 points"},
                 {"label": "Window", "value": "closed"},
             ],
-            ["The 10:00 fade and the 11:00 shot have both been judged."],
+            ["The morning shot window has closed for today."],
         )
-    weighing_11 = minutes >= 10 * 60 + 5
+    weighing_11 = (not fade10_day(now)) or (minutes >= 10 * 60 + 5)
     start = 11 * 60 if weighing_11 else 10 * 60
     closes = bar_closes_in(now, start)
     level = near_level(move, SHOT_POINTS)
@@ -758,7 +788,7 @@ def shots_idea(now, minutes, bid, bars, position, trading):
         state = "Ready"
         side = ("buy" if move > 0 else "sell") if weighing_11 else ("sell" if move > 0 else "buy")
         word = "Buy" if side == "buy" else "Sell"
-        action = "with the move" if weighing_11 else "the fade"
+        action = "with the move" if weighing_11 else "the Thursday fade"
         lead = f"Ready to {word.lower()} {action}."
     elif level == "met":
         state, side = "Getting close", ""
@@ -769,7 +799,7 @@ def shots_idea(now, minutes, bid, bars, position, trading):
     else:
         state, side = "Watching", ""
         lead = move_words(move, SHOT_POINTS)
-    when = "11:00 goes with the move" if weighing_11 else "10:00 fades the move"
+    when = "11:00 goes with a 60+ pt move" if weighing_11 else "Thursday 10:00 fades a 60+ pt move"
     facts = [
         {"label": "Bid", "value": price_text(bid)},
         {"label": "From the open", "value": "—" if move is None else f"{move:+.1f}"},
@@ -777,8 +807,8 @@ def shots_idea(now, minutes, bid, bars, position, trading):
         {"label": "Bar closes" if closes else f"{'11:00' if weighing_11 else '10:00'} in", "value": closes or clock_left(now, start)},
     ]
     lines = [f"{when}. Stop {SHOT_STOP:.0f}, target {SHOT_TARGET:.0f}, risk ${SHOT_RISK:.0f}."]
-    if weighing_11:
-        lines.append("The 10:00 fade has passed.")
+    if weighing_11 and fade10_day(now) and minutes >= 10 * 60 + 5:
+        lines.append("The Thursday 10:00 fade has passed.")
     if state == "Ready" and not trading:
         lines.append("Trading is off on this login, so no order will be sent.")
     return idea("shots", "Nasdaq shots", state, side, lead, facts, lines)
@@ -811,119 +841,75 @@ def fallback_idea(now, minutes, bid, bars, position, trading):
     if role == "fallback":
         side, word, facts = trade_facts(position, bid)
         return idea(
-            "fallback", "11:00 fallback", "In a trade", side,
+            "fallback", "11:00 range-fade", "In a trade", side,
             f"{word} {float(position.volume):.2f} lots from {price_text(float(position.price_open))}.",
             facts,
-            ["This is the one Nasdaq trade. Stop 30, target 120." if minutes >= 11 * 60 else "This was the earlier entry, so 11:00 will not be taken as well."],
+            ["Half-shot ($1,400 risk). Stop 20, target 120 (or 100 on 14:30 afternoon drive)."],
         )
     if now.weekday() >= 5:
         return idea(
-            "fallback", "11:00 fallback", "Standing aside", "",
+            "fallback", "11:00 range-fade", "Standing aside", "",
             "The Nasdaq session is closed for the weekend.",
-            [{"label": "Bid", "value": price_text(bid)}, {"label": "Needs", "value": "0.5 points"}, {"label": "Stop", "value": "30"}, {"label": "Target", "value": "120"}],
-            ["It returns on Monday, one trade at 11:00 New York."],
+            [{"label": "Bid", "value": price_text(bid)}, {"label": "Band", "value": "10..60 pts"}, {"label": "Stop", "value": "20"}, {"label": "Target", "value": "120"}],
+            ["Fades a 10..60 point morning range back toward the 09:30 open at 11:00 NY ($1,400 risk)."],
         )
     if role == "shots":
         return idea(
-            "fallback", "11:00 fallback", "Standing aside", "",
-            "A Nasdaq shot has the account.",
+            "fallback", "11:00 range-fade", "Standing aside", "",
+            "A $2,400 Nasdaq shot has the account.",
             [
                 {"label": "Bid", "value": price_text(bid)},
                 {"label": "From the open", "value": "—" if move is None else f"{move:+.1f}"},
-                {"label": "Needs", "value": "0.5 points"},
+                {"label": "Band", "value": "10..60 pts"},
                 {"label": "11:00 in", "value": clock_left(now, 11 * 60)},
             ],
-            ["The smaller 11:00 trade waits until that shot is flat."],
+            ["The $1,400 range-fade waits unless the account is flat."],
         )
     if shot_day(now) and move is not None and abs(move) >= SHOT_POINTS and minutes <= 11 * 60 + 4:
         return idea(
-            "fallback", "11:00 fallback", "Standing aside", "",
-            "The move is large enough for the 11:00 shot.",
+            "fallback", "11:00 range-fade", "Standing aside", "",
+            "Morning move is 60+ points — that belongs to the $2,400 trend shot.",
             [
                 {"label": "Bid", "value": price_text(bid)},
                 {"label": "From the open", "value": f"{move:+.1f}"},
-                {"label": "Shot line", "value": "60"},
-                {"label": "This trade", "value": "steps aside"},
+                {"label": "Band", "value": "10..60 pts"},
+                {"label": "Regime", "value": "Breakout (>=60)"},
             ],
-            ["The 60 point shot goes first. This smaller trade is the backup."],
-        )
-    if not shot_day(now) and minutes < 11 * 60:
-        pullback = None if move is None else morning_pullback(bars, move, bid)
-        given_back = pullback is not None and move is not None and abs(move) > 0 and pullback > abs(move) * 0.5
-        bar_left = f"{(5 - (now.minute % 5)) * 60 - now.second} sec" if now.minute % 5 != 0 or now.second != 0 else "now"
-        facts = [
-            {"label": "Bid", "value": price_text(bid)},
-            {"label": "From the open", "value": "—" if move is None else f"{move:+.1f}"},
-            {"label": "Earlier needs", "value": "60 points"},
-            {"label": "11:00 in", "value": clock_left(now, 11 * 60)},
-        ]
-        if move is None:
-            return idea(
-                "fallback", "11:00 fallback", "Watching", "",
-                "Waiting for the 09:30 open. The 11:00 trade stays unless an earlier entry is already there.",
-                facts,
-                ["After the open, a 60 point move that has not given back half is taken when that 5-minute bar closes. Otherwise it still waits for 11:00."],
-            )
-        if abs(move) >= SHOT_POINTS and not given_back:
-            side = "buy" if move > 0 else "sell"
-            way = "above" if move > 0 else "below"
-            lines = ["This replaces the 11:00 trade. Same stop 30, target 120, and $250 risk. It sends when this 5-minute bar closes."]
-            facts[3] = {"label": "Bar closes", "value": bar_left}
-            if not trading:
-                lines.append("Trading is off on this login, so no order will be sent.")
-            return idea(
-                "fallback", "11:00 fallback", "Ready", side,
-                f"Taking the earlier entry. Price is {abs(move):.1f} points {way} the open, and half of that move has not been given back.",
-                facts, lines,
-            )
-        if given_back:
-            return idea(
-                "fallback", "11:00 fallback", "Watching", "",
-                f"Waiting for 11:00. Price is {abs(move):.1f} points from the open, but half of that move has been given back.",
-                facts,
-                ["The earlier entry stays off. The 11:00 trade is unchanged."],
-            )
-        short = max(0.0, SHOT_POINTS - abs(move))
-        state = "Getting close" if abs(move) >= SHOT_POINTS * 0.67 else "Watching"
-        return idea(
-            "fallback", "11:00 fallback", state, "",
-            f"Waiting for 11:00. Price is {abs(move):.1f} points from the open, {short:.1f} short of the earlier entry.",
-            facts,
-            ["The earlier entry needs 60 points from the 09:30 open without giving half back. If that does not happen, the 11:00 trade still runs."],
+            ["When 09:30->11:00 clears 60 points, we ride the breakout ($2,400). When it stays in 10..60 pts, we fade the range ($1,400)."],
         )
     if minutes >= 11 * 60 + 5:
         return idea(
-            "fallback", "11:00 fallback", "Passed", "",
-            move_words(move, 0.5) if move is not None else "The 11:00 bar has closed.",
+            "fallback", "11:00 range-fade", "Passed", "",
+            move_words(move, FALLBACK_MIN) if move is not None else "The 11:00 bar has closed.",
             [
                 {"label": "Bid", "value": price_text(bid)},
                 {"label": "From the open", "value": "—" if move is None else f"{move:+.1f}"},
-                {"label": "Needed", "value": "0.5 points"},
+                {"label": "Band", "value": "10..60 pts"},
                 {"label": "Window", "value": "closed"},
             ],
-            ["That was the Nasdaq decision for today."],
+            ["The 11:00 decision has passed for today."],
         )
-    enough = move is not None and abs(move) >= 0.5
+    in_band = move is not None and FALLBACK_MIN <= abs(move) < SHOT_POINTS
     closes = bar_closes_in(now, 11 * 60)
-    if closes and enough:
-        side = "buy" if move > 0 else "sell"
+    if closes and in_band:
+        side = "sell" if move > 0 else "buy"
         word = "buy" if side == "buy" else "sell"
-        state, lead = "Ready", f"Ready to {word} the 11:00 trade."
-    elif enough and minutes >= 10 * 60 + 30:
+        state, lead = "Ready", f"Ready to {word} (fade) the 11:00 range move ($1,400)."
+    elif in_band and minutes >= 10 * 60 + 30:
         state, side = "Getting close", ""
-        lead = move_words(move, 0.5)
+        lead = f"Price is {move:+.1f} pts from the 09:30 open (inside the 10..60 pt fade band)."
     else:
         state, side = "Watching", ""
-        lead = "Waiting for the 09:30 New York open." if move is None else move_words(move, 0.5)
-    lines = ["The earlier entry did not fire. This is the 11:00 trade, with the morning. Stop 30, target 120, risk $250."]
+        lead = "Waiting for the 09:30 New York open." if move is None else f"Price is {move:+.1f} pts from 09:30 (fade band is 10..60 pts)."
+    lines = ["When 09:30->11:00 stays between 10 and 60 points, fade it back toward the open. Stop 20, target 120, risk $1,400."]
     if state == "Ready" and not trading:
         lines.append("Trading is off on this login, so no order will be sent.")
     return idea(
-        "fallback", "11:00 fallback", state, side, lead,
+        "fallback", "11:00 range-fade", state, side, lead,
         [
             {"label": "Bid", "value": price_text(bid)},
             {"label": "From the open", "value": "—" if move is None else f"{move:+.1f}"},
-            {"label": "Needs", "value": "0.5 points"},
+            {"label": "Band", "value": "10..60 pts"},
             {"label": "11:00 in" if not closes else "Bar closes", "value": closes or clock_left(now, 11 * 60)},
         ],
         lines,
@@ -931,26 +917,63 @@ def fallback_idea(now, minutes, bid, bars, position, trading):
 
 
 def hop_idea(now, bid, bars, position):
-    move = half_hour_move(bars)
-    move_text = "—" if move is None else f"{move:+.1f}"
+    op13 = open_1300(bars)
+    mv_pm = None if op13 is None else bid - op13
+    move_text = "—" if mv_pm is None else f"{mv_pm:+.1f}"
+    minutes = now.hour * 60 + now.minute
     if owns(position, "hop"):
         side, word, facts = trade_facts(position, bid)
         return idea(
-            "hop", "The hop", "In a trade", side,
+            "hop", "14:30 afternoon drive", "In a trade", side,
             f"{word} {float(position.volume):.2f} lots from {price_text(float(position.price_open))}.",
             facts,
-            ["This hop was left off. An open one is still managed."],
+            ["Afternoon continuation ($1,400 risk, stop 20, target 100)."],
         )
+    if not pm_drive_day(now):
+        return idea(
+            "hop", "14:30 afternoon drive", "Standing aside", "",
+            f"Today is {day_name(now)}. The 14:30 drive runs Wed, Thu, and Fri.",
+            [
+                {"label": "Bid", "value": price_text(bid)},
+                {"label": "Since 13:00", "value": move_text},
+                {"label": "Needs", "value": "80 points"},
+                {"label": "Days", "value": "Wed Thu Fri"},
+            ],
+            ["On Wed/Thu/Fri, if flat at 14:30 and price has moved 80+ pts from 13:00, ride it ($1,400 risk)."],
+        )
+    if minutes >= 14 * 60 + 35:
+        return idea(
+            "hop", "14:30 afternoon drive", "Passed", "",
+            "The 14:30 afternoon checkpoint has passed.",
+            [
+                {"label": "Bid", "value": price_text(bid)},
+                {"label": "Since 13:00", "value": move_text},
+                {"label": "Needed", "value": "80 points"},
+                {"label": "Window", "value": "closed"},
+            ],
+            ["Positions flatten at 15:55 New York."],
+        )
+    closes = bar_closes_in(now, 14 * 60 + 30)
+    level = near_level(mv_pm, PM_DRIVE_POINTS)
+    if closes and level == "met" and position is None:
+        side = "buy" if mv_pm > 0 else "sell"
+        state = "Ready"
+        lead = f"Ready to {side} the 14:30 afternoon drive ({mv_pm:+.1f} pts since 13:00)."
+    elif level in ("met", "Getting close"):
+        state, side = "Getting close", ""
+        lead = move_words(mv_pm, PM_DRIVE_POINTS)
+    else:
+        state, side = "Watching", ""
+        lead = "Waiting for the 13:00 afternoon open." if mv_pm is None else f"Since 13:00: {mv_pm:+.1f} pts (needs 80 pts at 14:30)."
     return idea(
-        "hop", "The hop", "Standing aside", "",
-        "Both hops on this account were stopped out, so this stays off.",
+        "hop", "14:30 afternoon drive", state, side, lead,
         [
             {"label": "Bid", "value": price_text(bid)},
-            {"label": "Last 30 min", "value": move_text},
-            {"label": "Would need", "value": "12 points"},
-            {"label": "After 11:00", "value": "off"},
+            {"label": "Since 13:00", "value": move_text},
+            {"label": "Needs", "value": "80 points"},
+            {"label": "14:30 in" if not closes else "Bar closes", "value": closes or clock_left(now, 14 * 60 + 30)},
         ],
-        ["Empty days stay with the one 11:00 trade. The hop does not replace it."],
+        ["Wed/Thu/Fri at 14:30 NY: if flat and 13:00->14:30 moved 80+ pts, go with it. Stop 20, target 100, risk $1,400."],
     )
 
 
@@ -993,104 +1016,19 @@ def gold_idea(now, minutes, trading, nasdaq_open, position, bid, ask, closed):
             "gold", "Gold scalp", "In a trade", side,
             f"{word} {float(position.volume):.2f} lots from {price_text(float(position.price_open))}.",
             facts,
-            ["It stands down at 16:00 New York, or sooner if a Nasdaq shot needs the account."],
+            ["Managing open gold position."],
         )
-    if now.weekday() >= 5:
-        return idea(
-            "gold", "Gold scalp", "Standing aside", "",
-            "Gold is off for the weekend.",
-            [{"label": "Bid", "value": "—"}, {"label": "Needs", "value": "1.20"}, {"label": "Spread", "value": "—"}, {"label": "Today", "value": "0 of 2"}],
-            ["It trades again from 03:00 New York on Monday."],
-        )
-    used = gold_used(now)
-    if nasdaq_open:
-        return idea(
-            "gold", "Gold scalp", "Standing aside", "",
-            "Nasdaq has the account. Gold waits until that trade is flat.",
-            [{"label": "Bid", "value": "—" if bid is None else price_text(bid)}, {"label": "Needs", "value": "1.20"}, {"label": "Today", "value": f"{used} of 2"}, {"label": "Window", "value": "aside"}],
-            ["A gold scalp does not share the account with an open Nasdaq trade."],
-        )
-    if minutes >= 16 * 60:
-        return idea(
-            "gold", "Gold scalp", "Passed", "",
-            "Gold finished at 16:00 New York.",
-            [{"label": "Bid", "value": "—" if bid is None else price_text(bid)}, {"label": "Needs", "value": "1.20"}, {"label": "Today", "value": f"{used} of 2"}, {"label": "Window", "value": "closed"}],
-            ["The next gold window opens at 03:00."],
-        )
-    if minutes < 3 * 60:
-        return idea(
-            "gold", "Gold scalp", "Watching", "",
-            "Gold starts at 03:00 New York.",
-            [{"label": "Bid", "value": "—" if bid is None else price_text(bid)}, {"label": "Needs", "value": "1.20"}, {"label": "Opens in", "value": clock_left(now, 3 * 60)}, {"label": "Today", "value": f"{used} of 2"}],
-            ["It buys or sells a move that is already going."],
-        )
-    blocked = (shot_day(now) and 9 * 60 + 50 <= minutes <= 11 * 60) or (not shot_day(now) and 10 * 60 + 50 <= minutes <= 11 * 60)
-    if blocked:
-        back = "11:01" if minutes <= 11 * 60 else "now"
-        return idea(
-            "gold", "Gold scalp", "Standing aside", "",
-            "Standing aside so the Nasdaq trade goes first.",
-            [{"label": "Bid", "value": "—" if bid is None else price_text(bid)}, {"label": "Needs", "value": "1.20"}, {"label": "Back at", "value": back}, {"label": "Today", "value": f"{used} of 2"}],
-            ["On shot days gold steps aside from 09:50. On other days, from 10:50 until 11:00."],
-        )
-    if used >= 2:
-        return idea(
-            "gold", "Gold scalp", "Passed", "",
-            "Both gold trades for today have been used.",
-            [{"label": "Bid", "value": "—" if bid is None else price_text(bid)}, {"label": "Needs", "value": "1.20"}, {"label": "Today", "value": "2 of 2"}, {"label": "Spread", "value": "—" if bid is None or ask is None else f"{ask - bid:.2f}"}],
-            ["It can look again after 03:00 tomorrow."],
-        )
-    if bid is None or ask is None or closed is None or len(closed) < 3:
-        return idea(
-            "gold", "Gold scalp", "Watching", "",
-            "Gold prices are not in yet.",
-            [{"label": "Bid", "value": "—"}, {"label": "Needs", "value": "1.20"}, {"label": "Spread", "value": "—"}, {"label": "Today", "value": f"{used} of 2"}],
-            ["It needs the last three closed minutes."],
-        )
-    net = float(closed[-1]["close"]) - float(closed[0]["open"])
-    last = float(closed[-1]["close"]) - float(closed[-1]["open"])
-    spread = ask - bid
-    short = max(0.0, GOLD_MIN - abs(net))
-    way = "up" if net > 0 else "down" if net < 0 else "flat"
-    last_way = "up" if last > 0 else "down" if last < 0 else "flat"
-    same_way = (net > 0 and last > 0) or (net < 0 and last < 0)
-    facts = [
-        {"label": "Bid", "value": price_text(bid)},
-        {"label": "Last 3 min", "value": f"{net:+.2f}"},
-        {"label": "Last minute", "value": f"{last:+.2f}"},
-        {"label": "Spread", "value": f"{spread:.2f}"},
-    ]
-    lines = [f"It needs {GOLD_MIN:.2f} over three minutes, with the last minute still going that way. Spread limit 0.60. Risk ${GOLD_RISK:.0f}. Today {used} of 2."]
-    if spread > 0.60:
-        lines.append(f"The spread is {spread:.2f}, wider than 0.60, so it will not bite.")
-        return idea("gold", "Gold scalp", "Watching", "", f"Last 3 minutes {net:+.2f}. The spread is too wide.", facts, lines)
-    if abs(net) < GOLD_MIN * 0.67:
-        return idea("gold", "Gold scalp", "Watching", "", f"Last 3 minutes {net:+.2f}. It is {short:.2f} short of {GOLD_MIN:.2f}.", facts, lines)
-    if abs(net) < GOLD_MIN:
-        extra = "" if same_way else f" The last minute is {last_way}."
-        return idea("gold", "Gold scalp", "Getting close", "", f"Last 3 minutes {net:+.2f}. It is {short:.2f} short of {GOLD_MIN:.2f}.{extra}", facts, lines)
-    buy = net > 0
-    window = list(closed)
-    if buy:
-        pullback = max(float(bar["high"]) for bar in window) - float(window[-1]["close"])
-    else:
-        pullback = float(window[-1]["close"]) - min(float(bar["low"]) for bar in window)
-    if pullback > abs(net) * 0.5:
-        lines.append("Half of that three-minute move has been given back.")
-        return idea("gold", "Gold scalp", "Watching", "", f"Last 3 minutes moved {abs(net):.2f} {way}, but half of it has been given back.", facts, lines)
-    if not same_way:
-        lines.append("The last minute is not still going that way, so this push is left alone.")
-        return idea("gold", "Gold scalp", "Watching", "", f"Last 3 minutes moved {abs(net):.2f} {way}, but the last minute is {last_way}.", facts, lines)
-    bite = min(2.50, max(0.90, abs(net) * 0.50))
-    stop = min(1.60, max(0.80, pullback + 0.30))
-    if bite < stop or bite < spread * 2:
-        lines.append("The target is too close for the stop and the spread.")
-        return idea("gold", "Gold scalp", "Watching", "", f"Last 3 minutes moved {abs(net):.2f} {way}. The bite is too small.", facts, lines)
-    side = "buy" if buy else "sell"
-    lines.append(f"The last minute is still {last_way}. Risk ${GOLD_RISK:.0f}.")
-    if not trading:
-        lines.append("Trading is off on this login, so no order will be sent.")
-    return idea("gold", "Gold scalp", "Ready", side, f"Ready to {side}. The move is {abs(net):.2f} {way} and the last minute is still {last_way}.", facts, lines)
+    return idea(
+        "gold", "Gold scalp", "Standing aside", "",
+        "Gold scalping is turned off so the account focuses 100% on the 4-rule Nasdaq book.",
+        [
+            {"label": "Bid", "value": "—" if bid is None else price_text(bid)},
+            {"label": "State", "value": "off"},
+            {"label": "Spread", "value": "—" if bid is None or ask is None else f"{ask - bid:.2f}"},
+            {"label": "Focus", "value": "US100.cash"},
+        ],
+        ["Turned off after 2026 backtests showed negative expectancy on XAUUSD M1 scalps."],
+    )
 
 
 def nas_view(now, minutes, bid, ask, bars, trading, position):
@@ -1100,18 +1038,20 @@ def nas_view(now, minutes, bid, ask, bars, trading, position):
         if hour == "09" and minute == "30":
             open930 = bar["o"]
     move = None if open930 is None else bid - open930
-    shot_day = now.weekday() in (0, 3, 4)
-    order, why = wanted_order(move, minutes, bars, bid, ask, shot_day)
+    is_shot_day = shot_day(now)
+    order, why = wanted_order(move, minutes, bars, bid, ask, is_shot_day, now=now)
     levels = []
     if open930 is not None:
         levels.append(level(open930, "#ffd700", f"{open930:.2f}"))
         levels.append(level(open930 + SHOT_POINTS, "#8a8a8a", f"{open930 + SHOT_POINTS:.2f}", True))
         levels.append(level(open930 - SHOT_POINTS, "#8a8a8a", f"{open930 - SHOT_POINTS:.2f}", True))
     lines = []
-    if shot_day:
-        lines.append("Shot day. 10:00 fades the move. 11:00 goes with it.")
+    if fade10_day(now):
+        lines.append("Thursday: 10:00 fades 60+ pt move ($2.4k). 11:00 rides 60+ pt ($2.4k) or fades 10..60 pt ($1.4k). 14:30 rides 80+ pt PM drive ($1.4k).")
+    elif is_shot_day:
+        lines.append("Shot day: 11:00 rides 60+ pt ($2.4k) or fades 10..60 pt ($1.4k).")
     else:
-        lines.append("Not a shot day. One Nasdaq trade at 11:00 New York.")
+        lines.append("Tuesday: 11:00 fades a 10..60 pt range move ($1,400).")
     if position is not None:
         state, tone, side = "In trade", "in", "buy" if position.type == mt5.POSITION_TYPE_BUY else "sell"
         lines.append(f"{side.title()} {float(position.volume):.2f} at {float(position.price_open):.2f}.")
@@ -1176,65 +1116,9 @@ def gold_view(now, minutes, trading, nasdaq_open, position):
             lines.append(f"{side.title()} {float(position.volume):.2f} from {float(position.price_open):.2f}.")
             lines.append("It stands down at 16:00 New York, or sooner if a Nasdaq shot needs the account.")
             levels = position_levels(position)
-        elif nasdaq_open:
-            state, tone = "Aside", "aside"
-            lines.append("Nasdaq has the account. Gold waits until that trade is flat.")
-        elif now.weekday() >= 5:
-            lines.append("Gold is off for the weekend.")
-        elif minutes < 3 * 60 or minutes >= 16 * 60:
+        elif position is None:
             state, tone = "Off", "off"
-            lines.append("Gold trades from 03:00 to 16:00 New York.")
-        elif (now.weekday() in (0, 3, 4) and 9 * 60 + 50 <= minutes <= 11 * 60):
-            state, tone = "Aside", "aside"
-            lines.append("Standing aside so the Nasdaq shots go first.")
-        elif now.weekday() not in (0, 3, 4) and 10 * 60 + 50 <= minutes <= 11 * 60:
-            state, tone = "Aside", "aside"
-            lines.append("Standing aside for the 11:00 Nasdaq trade.")
-        elif gold_used(now) >= 2:
-            state, tone = "Passed", "off"
-            lines.append("Both gold trades for today have been used.")
-        elif tick is None or closed is None or len(closed) < 3:
-            state, tone = "Waiting", "wait"
-            lines.append("Gold prices are not in yet.")
-        else:
-            net = float(closed[-1]["close"]) - float(closed[0]["open"])
-            spread = ask - bid
-            lines.append(f"Last 3 minutes {net:+.2f}. It needs {GOLD_MIN:.2f}. Spread {spread:.2f}.")
-            last = float(closed[-1]["close"]) - float(closed[-1]["open"])
-            same_way = (net > 0 and last > 0) or (net < 0 and last < 0)
-            if spread > 0.60:
-                state, tone = "Blocked", "block"
-                lines.append("The spread is too wide to take the bite.")
-            elif abs(net) < GOLD_MIN:
-                state, tone = "Watching", "wait"
-            else:
-                buy = net > 0
-                window = list(closed)
-                if buy:
-                    pullback = max(float(bar["high"]) for bar in window) - float(window[-1]["close"])
-                else:
-                    pullback = float(window[-1]["close"]) - min(float(bar["low"]) for bar in window)
-                if pullback > abs(net) * 0.5:
-                    state, tone = "Watching", "wait"
-                    lines.append("Half of that move has been given back.")
-                elif not same_way:
-                    state, tone = "Watching", "wait"
-                    lines.append("The last minute is not still going that way.")
-                else:
-                    side = "buy" if buy else "sell"
-                    state = "Ready" if trading else "Blocked"
-                    tone = "ready" if trading else "block"
-                    entry = ask if buy else bid
-                    bite = min(2.50, max(0.90, abs(net) * 0.50))
-                    stop = min(1.60, max(0.80, pullback + 0.30))
-                    sl = entry - stop if buy else entry + stop
-                    tp = entry + bite if buy else entry - bite
-                    lines.append(f"Wants to {side}. Risk ${GOLD_RISK:.0f}.")
-                    levels = [
-                        level(entry, "#ffffff", f"{entry:.2f}"),
-                        level(sl, "#ff3b30", f"{sl:.2f}"),
-                        level(tp, "#00c000", f"{tp:.2f}"),
-                    ]
+            lines.append("Gold scalping is turned off.")
     if not trading and state not in ("In trade",):
         lines.append("Trading is off on this login.")
         if state == "Ready":

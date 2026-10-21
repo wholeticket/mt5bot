@@ -25,6 +25,7 @@ struct OrbSettings
    int    max_morning_entries; // 0 keeps the 2-or-3 cap
    bool   require_open_fail;   // short only after a checkpoint closed back at the open
    int    weekdays;            // bits Mon=1 Tue=2 Wed=4 Thu=8 Fri=16, 0 or 31 is every day
+   int    fade10_weekdays;     // weekdays allowed for the 10:00 fade (8 = Thursday only)
    bool   morning_fade;        // the original 09:40-10:55 short
    bool   day_shots;           // 10:00 fade and 11:00 continuation
    double day_move;            // points from the 09:30 open
@@ -33,8 +34,14 @@ struct OrbSettings
    int    daily_minute;        // New York minute of that trade
    int    daily_dir;           // 1 goes with the morning move, -1 fades it
    double daily_min_move;
+   double daily_max_move;
    double daily_stop;
    double daily_target;
+   bool   pm_drive_on;         // 14:30 continuation off the 13:00 afternoon open
+   int    pm_drive_weekdays;   // bits Mon=1 Tue=2 Wed=4 Thu=8 Fri=16 (28 = Wed/Thu/Fri)
+   double pm_drive_move;       // points from the 13:00 open
+   double pm_drive_stop;
+   double pm_drive_target;
   };
 
 struct OrbSignal
@@ -71,6 +78,9 @@ private:
    bool        m_fade10_done;
    bool        m_with11_done;
    bool        m_daily_done;
+   double      m_pm_drive_open;
+   bool        m_pm_drive_seen;
+   bool        m_pm_drive_done;
    double      m_drive_high;
    double      m_drive_low;
    bool        m_drive_seen;
@@ -98,6 +108,9 @@ private:
       m_fade10_done=false;
       m_with11_done=false;
       m_daily_done=false;
+      m_pm_drive_open=0.0;
+      m_pm_drive_seen=false;
+      m_pm_drive_done=false;
       m_drive_high=0.0;
       m_drive_low=0.0;
       m_drive_seen=false;
@@ -258,6 +271,9 @@ public:
       m_replay=false;
       m_drive_seen=false;
       m_daily_done=false;
+      m_pm_drive_open=0.0;
+      m_pm_drive_seen=false;
+      m_pm_drive_done=false;
      }
 
    void Configure(const OrbSettings &settings)
@@ -325,11 +341,11 @@ public:
      }
 
    // Two later shots off the same 09:30 open. At 10:00 a move of day_move
-   // points is faded. At 11:00 a move of that size is taken in its own
-   // direction. Each one gets a single try. The target is day_target
-   // points beyond that bar's close, and the position is held to the
-   // cash close rather than the 11:30 morning flat.
-   ENUM_ICT_SIGNAL DayShots(const MqlRates &bar,const int bar_min,
+   // points is faded on fade10_weekdays (Thursday). At 11:00 a move of that
+   // size is taken in its own direction on shot weekdays (Mon/Wed/Thu/Fri).
+   // Each one gets a single try. The target is day_target points beyond that
+   // bar's close, and the position is held to the cash close.
+   ENUM_ICT_SIGNAL DayShots(const MqlRates &bar,const int bar_min,const int dow,
                             double &stop_distance,double &target)
      {
       int open_min=9*60+30;
@@ -345,12 +361,22 @@ public:
       bool with_bar=(bar_min==11*60);
       if(!fade_bar && !with_bar)
          return ICT_SIGNAL_NONE;
+
+      int fade_days=(m_cfg.fade10_weekdays>0 ? m_cfg.fade10_weekdays : m_cfg.weekdays);
+      int with_days=(m_cfg.weekdays>0 ? m_cfg.weekdays : 31);
+      bool fade_allowed=((fade_days&(1<<(dow-1)))!=0);
+      bool with_allowed=((with_days&(1<<(dow-1)))!=0);
+      if((fade_bar && !fade_allowed) || (with_bar && !with_allowed))
+         return ICT_SIGNAL_NONE;
+
       if((fade_bar && m_fade10_done) || (with_bar && m_with11_done))
          return ICT_SIGNAL_NONE;
       if(fade_bar)
          m_fade10_done=true;
       else
          m_with11_done=true;
+      if(m_replay)
+         return ICT_SIGNAL_NONE;
 
       double move=bar.close-m_shot_open;
       if(MathAbs(move)<m_cfg.day_move)
@@ -412,8 +438,9 @@ public:
       return (buy ? ICT_SIGNAL_BUY : ICT_SIGNAL_SELL);
      }
 
-   // One trade on the 11:00 bar, in the direction of the move since 09:30.
-   // A flat morning is left alone. This does not replace the 60-point shots.
+   // One trade on the 11:00 bar when the morning stayed in a range (<60 pts)
+   // rather than breaking out. Fading a 10..60 point morning drift back toward
+   // the 09:30 open won in 8 of 10 months across 2026.
    ENUM_ICT_SIGNAL DailyOnce(const MqlRates &bar,const int bar_min,
                              double &stop_distance,double &target)
      {
@@ -423,17 +450,55 @@ public:
          m_shot_open=bar.open;
          m_shot_seen=true;
         }
-      if(m_replay || m_daily_done || !m_shot_seen || bar_min!=m_cfg.daily_minute)
+      if(!m_shot_seen || bar_min!=m_cfg.daily_minute)
          return ICT_SIGNAL_NONE;
-
+      if(m_daily_done)
+         return ICT_SIGNAL_NONE;
       m_daily_done=true;
+      if(m_replay)
+         return ICT_SIGNAL_NONE;
       double move=bar.close-m_shot_open;
       if(MathAbs(move)<m_cfg.daily_min_move || MathAbs(move)<0.5)
+         return ICT_SIGNAL_NONE;
+      if(m_cfg.daily_max_move>0.0 && MathAbs(move)>=m_cfg.daily_max_move)
          return ICT_SIGNAL_NONE;
 
       bool buy=(m_cfg.daily_dir>=0 ? move>0.0 : move<0.0);
       stop_distance=m_cfg.daily_stop;
       target=bar.close+(buy ? m_cfg.daily_target : -m_cfg.daily_target);
+      return (buy ? ICT_SIGNAL_BUY : ICT_SIGNAL_SELL);
+     }
+
+   // Afternoon power-hour continuation at 14:30 NY off the 13:00 NY open.
+   // On Wed/Thu/Fri, when price has driven 80+ points between 13:00 and 14:30
+   // and the account is flat, ride the drive into the 15:55 close.
+   ENUM_ICT_SIGNAL AfternoonDrive(const MqlRates &bar,const int bar_min,const int dow,
+                                  double &stop_distance,double &target)
+     {
+      if(!m_cfg.pm_drive_on)
+         return ICT_SIGNAL_NONE;
+      if(bar_min==13*60)
+        {
+         m_pm_drive_open=bar.open;
+         m_pm_drive_seen=true;
+        }
+      if(!m_pm_drive_seen || m_pm_drive_done || bar_min!=14*60+30)
+         return ICT_SIGNAL_NONE;
+      int pm_days=(m_cfg.pm_drive_weekdays>0 ? m_cfg.pm_drive_weekdays : 28);
+      if((pm_days&(1<<(dow-1)))==0)
+         return ICT_SIGNAL_NONE;
+
+      m_pm_drive_done=true;
+      if(m_replay)
+         return ICT_SIGNAL_NONE;
+
+      double move=bar.close-m_pm_drive_open;
+      if(MathAbs(move)<m_cfg.pm_drive_move)
+         return ICT_SIGNAL_NONE;
+
+      bool buy=(move>0.0);
+      stop_distance=m_cfg.pm_drive_stop;
+      target=bar.close+(buy ? m_cfg.pm_drive_target : -m_cfg.pm_drive_target);
       return (buy ? ICT_SIGNAL_BUY : ICT_SIGNAL_SELL);
      }
 
@@ -505,24 +570,14 @@ public:
                return fade;
               }
            }
-         if(shot_day && m_cfg.day_shots)
+         if(m_cfg.day_shots)
            {
-            ENUM_ICT_SIGNAL shot=DayShots(bar,bar_min,out.stop_distance,out.target);
+            ENUM_ICT_SIGNAL shot=DayShots(bar,bar_min,dow,out.stop_distance,out.target);
             if(shot!=ICT_SIGNAL_NONE)
               {
                out.signal=shot;
                out.session="day";
                return shot;
-              }
-           }
-         if(m_cfg.daily_on && !shot_day)
-           {
-            ENUM_ICT_SIGNAL early=EarlyWithMove(bar,bar_min,out.stop_distance,out.target);
-            if(early!=ICT_SIGNAL_NONE)
-              {
-               out.signal=early;
-               out.session="daily";
-               return early;
               }
            }
          if(m_cfg.daily_on)
@@ -535,6 +590,18 @@ public:
                return daily;
               }
            }
+         if(m_cfg.pm_drive_on)
+           {
+            ENUM_ICT_SIGNAL pm_drive=AfternoonDrive(bar,bar_min,dow,out.stop_distance,out.target);
+            if(pm_drive!=ICT_SIGNAL_NONE)
+              {
+               out.signal=pm_drive;
+               out.session="daily";
+               return pm_drive;
+              }
+           }
+         if(m_cfg.morning_only)
+            return ICT_SIGNAL_NONE;
          if(!shot_day)
             return ICT_SIGNAL_NONE;
          // Afternoon dip stays on with the day shots. A shot still open
