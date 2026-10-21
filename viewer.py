@@ -1,4 +1,4 @@
-"""Live view of the pass bot. Nasdaq and gold, side by side. Read only. Sends no orders.
+"""Live view of the US100.cash FTMO $100k Pass Bot. Read only. Sends no orders.
 
 The page listens on this PC, ports 8765 and 18765.
 127.0.0.1 only works in a browser on this PC. From the laptop, open the
@@ -12,6 +12,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
 
 class _Mt5:
     def __getattr__(self, name):
@@ -42,10 +43,6 @@ LONDON_MAX = 30.0
 LONDON_STOP = 15.0
 LONDON_TARGET = 90.0
 LONDON_RISK = 660.0
-RIDE_RISK = 400.0
-GOLD = "XAUUSD"
-GOLD_MIN = 1.20
-GOLD_RISK = 250.0
 HOST = "0.0.0.0"
 PORTS = (8765, 18765)
 JOURNAL = Path(r"C:\Users\user\AppData\Roaming\MetaQuotes\Terminal\D0E8209F77C8CF37AD8BF550E51FF075\logs")
@@ -54,130 +51,378 @@ PAGE = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Pass bot</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PASS BOT — US100.cash FTMO $100k</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #1c2024; color: #c0c0c0; font: 12px Tahoma, sans-serif; }
-  body { display: flex; flex-direction: column; min-height: 100vh; }
-  header { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 5px 10px; background: #2a2e32; border-bottom: 1px solid #000; color: #fff; }
-  header b { color: #fff; font-weight: 600; }
-  .bad { color: #ff5252; }
-  .good { color: #00c000; }
-  .board { background: #000; border-bottom: 1px solid #000; }
-  .board h2 { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-  .board h2 .when { font-weight: 400; color: #fff; }
-  .board h2 .clock { font-weight: 400; color: #fff; }
-  .pulse { width: 7px; height: 7px; border-radius: 50%; background: #00c000; display: inline-block; margin-left: 8px; vertical-align: middle; animation: pulse 1.6s ease-in-out infinite; }
-  @keyframes pulse { 50% { opacity: 0.25; } }
-  .boardline { margin: 0; padding: 8px 12px; color: #fff; background: #000; border-bottom: 1px solid #222; line-height: 1.45; }
-  .ideas { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; }
-  .idea { min-width: 0; padding: 10px 12px 12px; background: #000; border-right: 1px solid #222; border-top: 2px solid #2a2e32; }
-  .idea.weighing { border-top-color: #fff; }
-  .idea.ready.buy { border-top-color: #1e88e5; }
-  .idea.ready.sell { border-top-color: #e53935; }
-  .idea.in { border-top-color: #fff; }
-  .idea-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding-bottom: 6px; border-bottom: 1px solid #222; }
-  .idea h3 { margin: 0; color: #fff; font: 600 13px Tahoma, sans-serif; }
-  .state { color: #b0b0b0; font: 600 12px Tahoma, sans-serif; white-space: nowrap; }
-  .state.close { color: #ffd700; }
-  .state.ready.buy { color: #1e88e5; }
-  .state.ready.sell { color: #e53935; }
-  .state.in { color: #fff; }
-  .lead { margin: 8px 0; color: #fff; line-height: 1.4; }
-  .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 12px; margin: 0 0 8px; }
-  .fact span { display: block; color: #808080; }
-  .fact b { display: block; margin-top: 1px; color: #fff; font-weight: 600; font-size: 13px; }
-  .fact b.tick, .clock.tick { animation: settle 0.9s ease; }
-  @keyframes settle { from { color: #ffd700; } to { color: #fff; } }
-  .idea p { margin: 0 0 4px; color: #c0c0c0; line-height: 1.45; }
-  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: #000; height: 34vh; min-height: 220px; }
-  .chartbox { display: flex; flex-direction: column; min-width: 0; background: #000; }
-  .charthead { display: flex; justify-content: space-between; gap: 8px; padding: 4px 8px; background: #2a2e32; color: #fff; }
-  .charthead .px { color: #fff; }
-  .charthead .px b { font-weight: 600; }
-  .chartwrap { position: relative; flex: 1; min-height: 0; background: #000; }
-  svg { width: 100%; height: 100%; display: block; background: #000; }
-  .corner { position: absolute; left: 8px; top: 6px; color: #fff; white-space: pre; line-height: 1.35; text-shadow: 1px 1px 0 #000; pointer-events: none; }
-  .desk { display: grid; grid-template-columns: 1fr; gap: 1px; background: #000; }
-  .panel { background: #000; min-width: 0; }
-  h2 { margin: 0; padding: 6px 10px; background: #2a2e32; color: #fff; font: 600 12px Tahoma, sans-serif; }
-  .side.buy { color: #1e88e5; }
-  .side.sell { color: #e53935; }
-  table { width: 100%; border-collapse: collapse; }
-  th { text-align: left; color: #9a9a9a; font-weight: 400; padding: 6px 8px; background: #141414; }
-  td { padding: 7px 8px; border-top: 1px solid #222; color: #e0e0e0; }
-  td.up { color: #1e88e5; }
-  td.down { color: #e53935; }
-  td.pnl { font-weight: 600; font-size: 13px; }
-  td.pnl.tick { animation: pnlflash 0.9s ease; }
-  @keyframes pnlflash { from { background: #2a2e32; } to { background: transparent; } }
-  #tradebox { border-bottom: 1px solid #000; }
-  .empty { padding: 12px; color: #9a9a9a; }
-  #journal { background: #000; border-top: 1px solid #222; max-height: 132px; overflow: auto; }
-  #lines { padding: 4px 10px 8px; }
-  .jrow { display: flex; gap: 14px; padding: 3px 0; }
-  .jrow span { color: #8a8a8a; min-width: 52px; }
-  .jrow b { font-weight: 400; color: #d0d0d0; }
-  .jrow.buy b { color: #00c000; }
-  .jrow.reject b { color: #ff5252; }
-  @media (max-width: 980px) {
-    .charts, .ideas, .facts { grid-template-columns: 1fr; }
+  :root {
+    --bg: #0b0e14;
+    --panel: #121722;
+    --panel-alt: #171e2c;
+    --border: #232c3d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --green: #2ea043;
+    --green-bright: #3fb950;
+    --red: #f85149;
+    --blue: #388bfd;
+    --gold: #d29922;
+    --gold-bright: #e3b341;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    min-height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+  }
+  body { display: flex; flex-direction: column; padding-bottom: 20px; }
+
+  /* Top Bar */
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 14px;
+    padding: 12px 20px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .badge-bot {
+    background: rgba(56, 139, 253, 0.16);
+    color: #58a6ff;
+    border: 1px solid rgba(56, 139, 253, 0.4);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 0.4px;
+  }
+  .symbol-tag { font-weight: 700; font-size: 15px; color: #fff; }
+  .sub-tag { color: var(--muted); font-size: 12px; }
+
+  .clocks {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: var(--bg);
+    padding: 6px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-variant-numeric: tabular-nums;
+  }
+  .clock-item span { color: var(--muted); font-size: 11px; text-transform: uppercase; margin-right: 6px; }
+  .clock-item b { color: #fff; font-size: 13px; }
+  .pulse {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--green-bright);
+    display: inline-block;
+    box-shadow: 0 0 8px var(--green-bright);
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse { 50% { opacity: 0.3; } }
+
+  /* FTMO Metrics Strip */
+  .metrics-bar {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 10px;
+    padding: 12px 20px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+  }
+  .metric-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+  }
+  .metric-card .lbl { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; }
+  .metric-card .val { font-size: 16px; font-weight: 700; color: #fff; margin-top: 3px; font-variant-numeric: tabular-nums; }
+  .metric-card .sub { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .good { color: var(--green-bright) !important; }
+  .bad { color: var(--red) !important; }
+  .warn { color: var(--gold-bright) !important; }
+
+  /* Status Banner */
+  .banner {
+    margin: 12px 20px 0;
+    padding: 10px 16px;
+    background: var(--panel-alt);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--blue);
+    border-radius: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .banner-text { font-weight: 600; color: #fff; font-size: 13px; }
+  .runner-pill {
+    font-size: 12px;
+    color: #c9d1d9;
+    background: rgba(255,255,255,0.05);
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+
+  /* 5-Rule Playbook Grid */
+  .section-head {
+    padding: 14px 20px 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .section-head h2 {
+    margin: 0;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--muted);
+  }
+  .ideas {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    padding: 0 20px;
+  }
+  .idea {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-top: 3px solid #30363d;
+    border-radius: 10px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transition: border-color 0.2s, transform 0.15s;
+  }
+  .idea.weighing { border-top-color: var(--blue); }
+  .idea.close { border-top-color: var(--gold-bright); background: #161c28; }
+  .idea.ready.buy { border-top-color: var(--green-bright); box-shadow: 0 0 16px rgba(63,185,80,0.15); }
+  .idea.ready.sell { border-top-color: var(--red); box-shadow: 0 0 16px rgba(248,81,73,0.15); }
+  .idea.in { border-top-color: var(--green-bright); background: #14201b; }
+  .idea.passed, .idea.aside { opacity: 0.72; }
+
+  .idea-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .idea-title { font-weight: 700; font-size: 14px; color: #fff; }
+  .idea-time { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .state {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 99px;
+    white-space: nowrap;
+    background: rgba(255,255,255,0.06);
+    color: var(--muted);
+  }
+  .state.watching { color: #58a6ff; background: rgba(56,139,253,0.14); }
+  .state.close { color: var(--gold-bright); background: rgba(210,153,34,0.18); }
+  .state.ready.buy { color: #fff; background: var(--green); }
+  .state.ready.sell { color: #fff; background: var(--red); }
+  .state.in { color: #fff; background: var(--green); }
+
+  .lead {
+    margin: 10px 0;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 500;
+    min-height: 36px;
+  }
+  .facts {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 10px;
+    padding: 10px;
+    background: var(--bg);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    margin-bottom: 10px;
+  }
+  .fact span { display: block; color: var(--muted); font-size: 11px; }
+  .fact b {
+    display: block;
+    margin-top: 2px;
+    color: #fff;
+    font-weight: 700;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+  }
+  .fact b.tick, .clock-val.tick { animation: settle 0.8s ease; }
+  @keyframes settle { from { color: var(--gold-bright); } to { color: #fff; } }
+  .idea-foot { color: var(--muted); font-size: 11.5px; line-height: 1.4; }
+
+  /* Main Workspace: Chart + Side Panel */
+  .workspace {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 14px;
+    padding: 14px 20px 0;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    background: var(--panel-alt);
+    border-bottom: 1px solid var(--border);
+    font-weight: 700;
+    color: #fff;
+  }
+  .card-head .px { font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .card-head .px b { color: #fff; font-weight: 700; margin-left: 4px; }
+
+  .chartwrap { position: relative; height: 390px; background: #090c10; }
+  svg { width: 100%; height: 100%; display: block; }
+  .corner {
+    position: absolute; left: 12px; top: 10px;
+    color: #c9d1d9; font-size: 12px; white-space: pre;
+    line-height: 1.4; text-shadow: 1px 1px 2px #000;
+    pointer-events: none;
+    background: rgba(11,14,20,0.75);
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+
+  .side-stack { display: flex; flex-direction: column; gap: 14px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th {
+    text-align: left; color: var(--muted); font-weight: 600;
+    font-size: 11px; text-transform: uppercase;
+    padding: 8px 12px; background: var(--bg);
+    border-bottom: 1px solid var(--border);
+  }
+  td { padding: 9px 12px; border-bottom: 1px solid var(--border); color: var(--text); }
+  td.up { color: var(--green-bright); font-weight: 700; }
+  td.down { color: var(--red); font-weight: 700; }
+  .side.buy { color: var(--green-bright); font-weight: 700; text-transform: uppercase; }
+  .side.sell { color: var(--red); font-weight: 700; text-transform: uppercase; }
+  .empty { padding: 16px; color: var(--muted); font-size: 12.5px; }
+
+  #lines { padding: 8px 14px; max-height: 220px; overflow-y: auto; }
+  .jrow {
+    display: flex; gap: 12px; padding: 5px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    font-size: 12px;
+  }
+  .jrow:last-child { border-bottom: none; }
+  .jrow span { color: var(--muted); min-width: 48px; font-variant-numeric: tabular-nums; }
+  .jrow b { font-weight: 500; color: #d0d7de; }
+  .jrow.buy b, .jrow.sell b { color: var(--green-bright); }
+  .jrow.reject b { color: var(--red); }
+
+  @media (max-width: 1300px) {
+    .ideas { grid-template-columns: repeat(3, 1fr); }
+    .metrics-bar { grid-template-columns: repeat(3, 1fr); }
+    .workspace { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 780px) {
+    .ideas { grid-template-columns: 1fr; }
+    .metrics-bar { grid-template-columns: repeat(2, 1fr); }
   }
 </style>
 </head>
 <body>
+
 <header>
-  <div id="symbol">Pass bot</div>
-  <div id="account"></div>
+  <div class="brand">
+    <span class="badge-bot">PASS BOT v6.30</span>
+    <div>
+      <div class="symbol-tag">US100.cash (Nasdaq 100) · M5</div>
+      <div class="sub-tag">5-Rule Book · 2-Stage Smart Runner (40% @ +1R &amp; -0.60R Cushion · +4R Locks +1.5R)</div>
+    </div>
+  </div>
+  <div class="clocks">
+    <div class="clock-item"><span>UK Time</span><b class="clock-val" id="clock-uk">--:--:--</b></div>
+    <div class="clock-item"><span>NY Time</span><b class="clock-val" id="clock-ny">--:--:--</b></div>
+    <i class="pulse" title="Live connection to MT5"></i>
+  </div>
 </header>
-<section class="board">
-  <h2><span>Thinking</span><span class="when"><span class="clock" id="clock"></span><i class="pulse"></i></span></h2>
-  <p class="boardline" id="board">Reading the terminal.</p>
-  <div class="ideas" id="think"></div>
-</section>
-<section class="desk" id="tradebox">
-  <section class="panel">
-    <h2>Trade</h2>
-    <div id="trades"><div class="empty">No open trade.</div></div>
-  </section>
-</section>
-<section class="charts">
-  <div class="chartbox">
-    <div class="charthead" id="head-nas"><span>US100.cash, M5</span></div>
+
+<section class="metrics-bar" id="metrics"></section>
+
+<div class="banner">
+  <div class="banner-text" id="board">Connecting to MetaTrader 5...</div>
+  <div class="runner-pill">Shot Risk: <b>$1,100</b> (Full TP <b>+$5,555</b>) · Half-Shot Risk: <b>$660</b> (Full TP <b>+$2,640</b>)</div>
+</div>
+
+<div class="section-head">
+  <h2>Daily 5-Rule Schedule (Monday – Friday)</h2>
+</div>
+<section class="ideas" id="think"></section>
+
+<section class="workspace">
+  <div class="card">
+    <div class="card-head" id="head-nas"><span>US100.cash · M5 Live Chart</span></div>
     <div class="chartwrap">
-      <svg id="chart-nas" viewBox="0 0 640 420" preserveAspectRatio="none"></svg>
+      <svg id="chart-nas" viewBox="0 0 820 400" preserveAspectRatio="none"></svg>
       <div class="corner" id="note-nas"></div>
     </div>
   </div>
-  <div class="chartbox">
-    <div class="charthead" id="head-gold"><span>XAUUSD, M1</span></div>
-    <div class="chartwrap">
-      <svg id="chart-gold" viewBox="0 0 640 420" preserveAspectRatio="none"></svg>
-      <div class="corner" id="note-gold"></div>
+
+  <div class="side-stack">
+    <div class="card">
+      <div class="card-head"><span>Open Position</span></div>
+      <div id="trades"><div class="empty">No open trade — bot is flat and watching the next window.</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><span>Weekly Schedule Overview (UK Time)</span></div>
+      <table>
+        <tr><th>Window (UK)</th><th>Setup</th><th>Active Days</th><th>Risk / Target</th></tr>
+        <tr><td><b>08:30 UK</b> (03:30 NY)</td><td>London Range-Fade (5..30 pts)</td><td>Mon Tue Wed Thu Fri</td><td>$660 · 15 SL / 90 TP</td></tr>
+        <tr><td><b>15:00 UK</b> (10:00 NY)</td><td>Thu 10am Snapback Fade (60+ pts)</td><td>Thursday only</td><td>$1,100 · 20 SL / 155 TP</td></tr>
+        <tr><td><b>16:00 UK</b> (11:00 NY)</td><td>11am Big Trend Shot (60+ pts)</td><td>Mon Wed Thu Fri</td><td>$1,100 · 20 SL / 155 TP</td></tr>
+        <tr><td><b>16:00 UK</b> (11:00 NY)</td><td>11am Mod Range-Fade (10..60 pts)</td><td>Mon Tue Wed</td><td>$660 · 20 SL / 120 TP</td></tr>
+        <tr><td><b>19:30 UK</b> (14:30 NY)</td><td>Afternoon Drive (80+ pts)</td><td>Wed Thu Fri</td><td>$660 · 20 SL / 100 TP</td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><span>Recent MT5 Journal</span></div>
+      <div id="lines"></div>
     </div>
   </div>
 </section>
-<section id="journal">
-  <h2>Journal</h2>
-  <div id="lines"></div>
-</section>
+
 <script>
 function esc(s) {
   return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;");
 }
 function htag(parts, y, price, color, text, x0, x1, dash) {
   const yy = y(price);
-  const dashAttr = dash ? ' stroke-dasharray="3 3"' : "";
-  parts.push('<line x1="'+x0+'" x2="'+x1+'" y1="'+yy+'" y2="'+yy+'" stroke="'+color+'" stroke-width="1"'+dashAttr+'/>');
-  const w = Math.max(46, text.length * 7);
-  parts.push('<rect x="'+(x1+2)+'" y="'+(yy-8)+'" width="'+w+'" height="16" fill="'+color+'"/>');
-  parts.push('<text x="'+(x1+2+w/2)+'" y="'+(yy+4)+'" fill="#000" font-size="11" text-anchor="middle" font-family="Tahoma">'+text+'</text>');
+  const dashAttr = dash ? ' stroke-dasharray="4 4"' : "";
+  parts.push('<line x1="'+x0+'" x2="'+x1+'" y1="'+yy+'" y2="'+yy+'" stroke="'+color+'" stroke-width="1.2"'+dashAttr+'/>');
+  const w = Math.max(54, text.length * 7.2);
+  parts.push('<rect x="'+(x1+4)+'" y="'+(yy-9)+'" width="'+w+'" height="18" rx="3" fill="'+color+'"/>');
+  parts.push('<text x="'+(x1+4+w/2)+'" y="'+(yy+4)+'" fill="#000" font-weight="700" font-size="11" text-anchor="middle">'+text+'</text>');
 }
 function draw(id, chart) {
   const svg = document.getElementById(id);
   const bars = (chart && chart.bars) || [];
   if (!bars.length) { svg.innerHTML = ""; return; }
   const levels = chart.levels || [];
-  const left = 6, right = 560, top = 14, bottom = 392;
+  const left = 10, right = 735, top = 16, bottom = 372;
   let lo = Math.min(...bars.map(b => b.l));
   let hi = Math.max(...bars.map(b => b.h));
   levels.forEach(level => {
@@ -193,31 +438,31 @@ function draw(id, chart) {
   for (let i = 0; i <= 5; i++) {
     const p = lo + span * i / 5;
     const yy = y(p);
-    parts.push('<line x1="'+left+'" x2="'+right+'" y1="'+yy+'" y2="'+yy+'" stroke="#292929"/>');
-    parts.push('<text x="568" y="'+(yy+4)+'" fill="#808080" font-size="11" font-family="Tahoma">'+p.toFixed(2)+'</text>');
+    parts.push('<line x1="'+left+'" x2="'+right+'" y1="'+yy+'" y2="'+yy+'" stroke="#1b2230"/>');
+    parts.push('<text x="742" y="'+(yy+4)+'" fill="#8b949e" font-size="11">'+p.toFixed(2)+'</text>');
   }
-  const step = Math.max(8, Math.round(bars.length / 5));
+  const step = Math.max(8, Math.round(bars.length / 6));
   for (let i = 0; i < bars.length; i += step) {
     const x = left + i * cw;
-    parts.push('<line x1="'+x+'" x2="'+x+'" y1="'+top+'" y2="'+bottom+'" stroke="#292929"/>');
-    parts.push('<text x="'+(x+2)+'" y="412" fill="#808080" font-size="11" font-family="Tahoma">'+bars[i].t+'</text>');
+    parts.push('<line x1="'+x+'" x2="'+x+'" y1="'+top+'" y2="'+bottom+'" stroke="#1b2230"/>');
+    parts.push('<text x="'+(x+2)+'" y="392" fill="#8b949e" font-size="11">'+bars[i].t+' NY</text>');
   }
   bars.forEach((b, i) => {
     const x = left + i * cw + cw * 0.5;
     const up = b.c >= b.o;
-    const color = "#ffffff";
-    parts.push('<line x1="'+x+'" x2="'+x+'" y1="'+y(b.h)+'" y2="'+y(b.l)+'" stroke="'+color+'" stroke-width="1"/>');
+    const stroke = up ? "#3fb950" : "#f85149";
+    const fill = up ? "#2ea043" : "#f85149";
+    parts.push('<line x1="'+x+'" x2="'+x+'" y1="'+y(b.h)+'" y2="'+y(b.l)+'" stroke="'+stroke+'" stroke-width="1.2"/>');
     const topY = y(Math.max(b.o, b.c));
     const botY = y(Math.min(b.o, b.c));
-    const fill = up ? "#000000" : "#ffffff";
-    parts.push('<rect x="'+(x-Math.max(1, cw*0.32))+'" y="'+topY+'" width="'+Math.max(1, cw*0.64)+'" height="'+Math.max(1, botY-topY)+'" fill="'+fill+'" stroke="'+color+'"/>');
+    parts.push('<rect x="'+(x-Math.max(1.2, cw*0.34))+'" y="'+topY+'" width="'+Math.max(2.4, cw*0.68)+'" height="'+Math.max(1.5, botY-topY)+'" fill="'+fill+'" stroke="'+stroke+'"/>');
   });
   levels.forEach(level => {
     if (!level.price) return;
     htag(parts, y, level.price, level.color, esc(level.label), left, right, level.dash);
     if (level.name) {
       const yy = y(level.price);
-      parts.push('<text x="'+(left+4)+'" y="'+(yy-4)+'" fill="'+level.color+'" font-size="11" font-family="Tahoma">'+esc(level.name)+'</text>');
+      parts.push('<text x="'+(left+6)+'" y="'+(yy-5)+'" fill="'+level.color+'" font-weight="600" font-size="11">'+esc(level.name)+'</text>');
     }
   });
   svg.innerHTML = parts.join("");
@@ -225,7 +470,7 @@ function draw(id, chart) {
 function head(id, chart) {
   const el = document.getElementById(id);
   if (!chart) { el.innerHTML = ""; return; }
-  el.innerHTML = "<span>" + esc(chart.title) + "</span><span class='px'>Bid <b>" + esc(chart.bid) + "</b>  Ask <b>" + esc(chart.ask) + "</b></span>";
+  el.innerHTML = "<span>" + esc(chart.title) + "</span><span class='px'>Bid <b>" + esc(chart.bid) + "</b> &nbsp; Ask <b>" + esc(chart.ask) + "</b> &nbsp; Spread <b>" + esc(chart.spread || "-") + "</b></span>";
 }
 function markTicks(root) {
   if (!markTicks.prev) markTicks.prev = {};
@@ -238,25 +483,21 @@ function markTicks(root) {
   });
 }
 function render(data) {
-  document.getElementById("symbol").textContent = "Pass bot   " + (data.symbol_line || "");
-  document.getElementById("account").innerHTML = data.account_html || "";
-  const clock = document.getElementById("clock");
-  const clockText = data.symbol_line || "";
-  if (clock.textContent !== clockText) {
-    clock.textContent = clockText;
-    clock.classList.remove("tick");
-    void clock.offsetWidth;
-    clock.classList.add("tick");
-  }
+  document.getElementById("clock-uk").textContent = data.uk_clock || "--:--:--";
+  document.getElementById("clock-ny").textContent = data.ny_clock || "--:--:--";
   document.getElementById("board").textContent = data.board || "";
+
+  const mbox = document.getElementById("metrics");
+  mbox.innerHTML = (data.metrics || []).map(m => {
+    return "<div class='metric-card'><div class='lbl'>" + esc(m.label) + "</div><div class='val " + esc(m.cls || "") + "'>" + esc(m.value) + "</div><div class='sub'>" + esc(m.sub || "") + "</div></div>";
+  }).join("");
+
   const charts = {};
   (data.charts || []).forEach(chart => { charts[chart.id] = chart; });
   head("head-nas", charts.nas);
-  head("head-gold", charts.gold);
   document.getElementById("note-nas").textContent = charts.nas ? (charts.nas.note || "") : "";
-  document.getElementById("note-gold").textContent = charts.gold ? (charts.gold.note || "") : "";
   draw("chart-nas", charts.nas);
-  draw("chart-gold", charts.gold);
+
   const root = document.getElementById("think");
   root.innerHTML = (data.thinking || []).map(card => {
     const side = card.side ? " " + esc(card.side) : "";
@@ -264,22 +505,27 @@ function render(data) {
     const facts = (card.facts || []).map(fact => {
       return "<div class='fact'><span>" + esc(fact.label) + "</span><b class='live' data-k='" + esc(card.id) + ":" + esc(fact.label) + "'>" + esc(fact.value) + "</b></div>";
     }).join("");
-    const lines = (card.lines || []).map(line => "<p>" + esc(line) + "</p>").join("");
-    return "<article class='idea" + weighing + " " + esc(card.tone || "") + side + "' id='idea-" + esc(card.id) + "'><div class='idea-top'><h3>" + esc(card.name) + "</h3><span class='state " + esc(card.tone || "") + side + "'>" + esc(card.state) + "</span></div><p class='lead'>" + esc(card.lead || "") + "</p><div class='facts'>" + facts + "</div>" + lines + "</article>";
+    const lines = (card.lines || []).map(line => "<div class='idea-foot'>" + esc(line) + "</div>").join("");
+    return "<article class='idea" + weighing + " " + esc(card.tone || "") + side + "' id='idea-" + esc(card.id) + "'>" +
+      "<div><div class='idea-top'><div><div class='idea-title'>" + esc(card.name) + "</div><div class='idea-time'>" + esc(card.subtitle || "") + "</div></div>" +
+      "<span class='state " + esc(card.tone || "") + side + "'>" + esc(card.state) + "</span></div>" +
+      "<div class='lead'>" + esc(card.lead || "") + "</div></div>" +
+      "<div><div class='facts'>" + facts + "</div>" + lines + "</div></article>";
   }).join("");
   markTicks(root);
+
   const trades = data.trades || [];
   const box = document.getElementById("trades");
   if (!trades.length) {
-    box.innerHTML = "<div class='empty'>No open trade.</div>";
+    box.innerHTML = "<div class='empty'>No open trade — bot is flat and watching the next window.</div>";
   } else {
     const rows = trades.map(row => {
       const cls = row.profit > 0 ? "up" : (row.profit < 0 ? "down" : "");
-      const word = row.side === "buy" ? "buy" : "sell";
+      const word = row.side === "buy" ? "BUY" : "SELL";
       const key = esc(row.ticket || row.symbol);
-      return "<tr><td>" + esc(row.symbol) + "</td><td class='side " + esc(row.side) + "'>" + word + "</td><td>" + esc(row.volume) + "</td><td>" + esc(row.price) + "</td><td data-k='" + key + ":current'>" + esc(row.current) + "</td><td>" + esc(row.sl) + "</td><td>" + esc(row.tp) + "</td><td class='pnl " + cls + "' data-k='" + key + ":profit'>" + esc(row.profit_text) + "</td></tr>";
+      return "<tr><td><b>" + esc(row.symbol) + "</b></td><td class='side " + esc(row.side) + "'>" + word + "</td><td>" + esc(row.volume) + "</td><td>" + esc(row.price) + "</td><td data-k='" + key + ":current'>" + esc(row.current) + "</td><td>" + esc(row.sl) + "</td><td>" + esc(row.tp) + "</td><td class='pnl " + cls + "' data-k='" + key + ":profit'>$" + esc(row.profit_text) + "</td></tr>";
     }).join("");
-    box.innerHTML = "<table><tr><th>Symbol</th><th>Type</th><th>Volume</th><th>Open</th><th>Current</th><th>S / L</th><th>T / P</th><th>Profit</th></tr>" + rows + "</table>";
+    box.innerHTML = "<table><tr><th>Symbol</th><th>Side</th><th>Lots</th><th>Entry</th><th>Current</th><th>Stop</th><th>Target</th><th>Open P&amp;L</th></tr>" + rows + "</table>";
     markTicks(box);
   }
   document.getElementById("lines").innerHTML = (data.journal || []).map(row => {
@@ -291,7 +537,7 @@ async function tick() {
     const data = await (await fetch("/api")).json();
     render(data);
   } catch (err) {
-    document.getElementById("symbol").textContent = "Pass bot";
+    document.getElementById("board").textContent = "Waiting for viewer API...";
   }
 }
 tick();
@@ -321,7 +567,7 @@ def plain_trade(text):
     if deal:
         side, volume, price = deal.groups()
         word = "Bought" if side.lower() == "buy" else "Sold"
-        return word, f"{word} {lot_words(volume)} at {float(price):.2f}"
+        return word.lower(), f"{word} {lot_words(volume)} at {float(price):.2f}"
     failed = re.search(
         r"failed market (buy|sell) ([\d.]+) \S+.*?\[([^\]]+)\]",
         text,
@@ -337,197 +583,83 @@ def plain_trade(text):
     moved = re.search(r"-> sl: ([\d.]+), tp: ([\d.]+) done", text, re.I)
     if moved:
         stop, target = moved.groups()
-        return "change", f"Stop moved to {float(stop):.2f}. Target left at {float(target):.2f}."
-    return None
+        return "move", f"Stop moved to {float(stop):.2f} (target {float(target):.2f})"
+    return None, None
 
 
 def journal_lines():
-    day = datetime.now().strftime("%Y%m%d")
-    path = JOURNAL / f"{day}.log"
-    if not path.exists():
-        return [{"time": "", "text": "No journal for today.", "kind": ""}]
-    events = []
-    for line in decode_log(path).splitlines():
-        if "\tTrades\t" not in line:
-            continue
-        parts = line.split("\t")
+    if not JOURNAL.exists():
+        return []
+    files = sorted(JOURNAL.glob("*.log"))
+    if not files:
+        return []
+    rows = []
+    seen = set()
+    for raw in decode_log(files[-1]).splitlines()[-400:]:
+        parts = raw.split("\t")
         if len(parts) < 5:
             continue
-        clock = parts[2].split(".")[0][:-3]
-        parsed = plain_trade(parts[-1].split(": ", 1)[-1])
-        if parsed is None:
-            continue
-        kind, text = parsed
-        events.append({"time": clock, "text": text, "kind": "buy" if kind == "Bought" else "sell" if kind == "Sold" else kind})
-    if not events:
-        return [{"time": "", "text": "No orders yet today.", "kind": ""}]
-    folded = []
-    for event in events:
-        if (
-            folded
-            and event["kind"] == "reject"
-            and folded[-1]["kind"] == "reject"
-            and folded[-1]["text"] == event["text"]
-        ):
-            folded[-1]["count"] += 1
-            folded[-1]["end"] = event["time"]
-            continue
-        event["count"] = 1
-        event["end"] = event["time"]
-        folded.append(event)
-    rows = []
-    for event in folded[-8:]:
-        when = event["time"] if event["count"] == 1 else f"{event['time']}–{event['end']}"
-        text = event["text"]
-        if event["count"] > 1 and event["kind"] == "reject":
-            text = f"{event['count']} orders rejected. Trading was switched off on the old login."
-        rows.append({"time": when, "text": text, "kind": event["kind"]})
-    return rows
+        when = parts[2].split(".")[0]
+        source = parts[3]
+        text = parts[4].strip()
+        kind = ""
+        line = None
+        if source.startswith("Trades"):
+            kind, line = plain_trade(text)
+            if kind == "reject" and "old login" in line:
+                if "old_login" in seen:
+                    continue
+                seen.add("old_login")
+        elif "authorized on" in text.lower():
+            line = "Connected to FTMO server."
+        if line:
+            rows.append({"time": when[:5], "kind": kind, "text": line})
+    return list(reversed(rows[-14:]))
 
 
-def lots(risk, distance):
-    if distance <= 0:
-        return 0.0
-    step = 0.01
-    return math.floor((risk / distance) / step + 1e-8) * step
+def us_dst(day):
+    march = datetime(day.year, 3, 1)
+    second_sunday = 8 + (6 - march.weekday()) % 7
+    november = datetime(day.year, 11, 1)
+    first_sunday = 1 + (6 - november.weekday()) % 7
+    start = datetime(day.year, 3, second_sunday, 7)
+    end = datetime(day.year, 11, first_sunday, 6)
+    return start <= day < end
+
+
+def uk_dst(day):
+    march31 = datetime(day.year, 3, 31)
+    last_sun_mar = 31 - (march31.weekday() + 1) % 7
+    oct31 = datetime(day.year, 10, 31)
+    last_sun_oct = 31 - (oct31.weekday() + 1) % 7
+    start = datetime(day.year, 3, last_sun_mar, 1)
+    end = datetime(day.year, 10, last_sun_oct, 1)
+    return start <= day < end
 
 
 def ny_now():
-    return datetime.now(timezone.utc) + timedelta(hours=-4)
+    utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    offset = -4 if us_dst(utc) else -5
+    return utc + timedelta(hours=offset)
+
+
+def uk_now():
+    utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    offset = 1 if uk_dst(utc) else 0
+    return utc + timedelta(hours=offset)
 
 
 def bar_ny(bar_time, offset_hours):
     real_utc = datetime.fromtimestamp(int(bar_time) - offset_hours * 3600, timezone.utc)
-    return real_utc + timedelta(hours=-4)
+    naive = real_utc.replace(tzinfo=None)
+    ny_offset = -4 if us_dst(naive) else -5
+    return naive + timedelta(hours=ny_offset)
 
 
 def server_offset_hours(tick_time):
-    delta = int(tick_time) - datetime.now(timezone.utc).timestamp()
+    now_utc = datetime.now(timezone.utc).timestamp()
+    delta = float(tick_time) - now_utc
     return int(round(delta / 3600.0))
-
-
-def order_from(side, bid, ask, stop, target, risk, comment):
-    price = ask if side == "buy" else bid
-    if side == "buy":
-        sl = price - stop
-        tp = price + target
-    else:
-        sl = price + stop
-        tp = price - target
-    return {
-        "symbol": "US100.cash",
-        "side": side,
-        "volume": f"{lots(risk, stop):.2f}",
-        "sl": f"{sl:.2f}",
-        "tp": f"{tp:.2f}",
-        "comment": comment,
-        "sl_price": sl,
-        "tp_price": tp,
-        "entry_price": price,
-    }
-
-
-def ride_order(bars, bid, ask):
-    closed = bars[:-1]
-    if len(closed) < 6:
-        return None, "Ride is waiting for a half hour of bars."
-    window = closed[-6:]
-    net = window[-1]["c"] - window[0]["o"]
-    if abs(net) < 12:
-        return None, f"Ride is off. The last half hour moved {net:+.1f}. It needs 12."
-    buy = net > 0
-    if buy:
-        pullback = max(bar["h"] for bar in window) - window[-1]["c"]
-    else:
-        pullback = window[-1]["c"] - min(bar["l"] for bar in window)
-    if pullback > abs(net) * 0.5:
-        return None, "Ride is off. The move has given back half."
-    bite = min(25.0, max(8.0, abs(net) * 0.40))
-    stop = min(20.0, max(8.0, pullback + 2.0))
-    if bite < stop:
-        return None, "Ride is off. The bite is smaller than the stop."
-    side = "buy" if buy else "sell"
-    word = "Buy" if buy else "Sell"
-    ticket = order_from(side, bid, ask, stop, bite, RIDE_RISK, "ORB ride")
-    return ticket, f"{word} the ride. The last half hour already moved {net:+.1f}."
-
-
-def wanted_order(move, minutes, bars, bid, ask, shot_day, now=None):
-    wd = now.weekday() if now is not None else 0
-    if 3 * 60 <= minutes < 3 * 60 + 35:
-        op3 = open_0300(bars)
-        if op3 is not None:
-            mv_lon = bid - op3
-            if LONDON_MIN <= abs(mv_lon) < LONDON_MAX:
-                side = "sell" if mv_lon > 0 else "buy"
-                word = "Buy" if side == "buy" else "Sell"
-                return order_from(side, bid, ask, LONDON_STOP, LONDON_TARGET, LONDON_RISK, "ORB london"), f"{word} the 08:30 UK (03:30 NY) London range-fade ({mv_lon:+.1f} pts, $600)."
-            return None, f"Watching 08:30 UK (03:30 NY) London open: {mv_lon:+.1f} pts (fades 5..30 pt move)."
-    if move is None:
-        if shot_day:
-            return None, "Waiting for the 09:30 New York open (after 08:30 UK London setup)."
-        return None, "Waiting for the 09:30 open. Today has the 11:00 range-fade ($600)."
-    if wd == 3 and minutes < 10 * 60:
-        if abs(move) < SHOT_POINTS:
-            return None, f"Thursday 10:00 fade. The open has moved {move:+.1f}. It needs 60."
-        side = "sell" if move > 0 else "buy"
-        word = "Sell" if side == "sell" else "Buy"
-        return order_from(side, bid, ask, SHOT_STOP, SHOT_TARGET, SHOT_RISK, "ORB day"), f"{word} the Thursday 10:00 fade ($1,000)."
-    if minutes < 11 * 60:
-        if shot_day and abs(move) >= SHOT_POINTS:
-            side = "buy" if move > 0 else "sell"
-            word = "Buy" if side == "buy" else "Sell"
-            return order_from(side, bid, ask, SHOT_STOP, SHOT_TARGET, SHOT_RISK, "ORB day"), f"{word} the 11:00 trend shot ($1,100)."
-        if wd in (0, 1, 2) and FALLBACK_MIN <= abs(move) < SHOT_POINTS:
-            side = "sell" if move > 0 else "buy"
-            word = "Buy" if side == "buy" else "Sell"
-            return order_from(side, bid, ask, FALLBACK_STOP, FALLBACK_TARGET, FALLBACK_RISK, "ORB daily"), f"{word} the 11:00 range-fade (Mon/Tue/Wed). Stop 20, target 120, $660."
-        return None, "11:00 trade is waiting for a 60-pt trend shot (or Mon/Tue/Wed 10..60 pt fade)."
-    if wd in (2, 3, 4) and 13 * 60 <= minutes < 14 * 60 + 35:
-        op13 = open_1300(bars)
-        if op13 is not None:
-            mv_pm = bid - op13
-            if abs(mv_pm) >= PM_DRIVE_POINTS:
-                side = "buy" if mv_pm > 0 else "sell"
-                word = "Buy" if side == "buy" else "Sell"
-                return order_from(side, bid, ask, PM_DRIVE_STOP, PM_DRIVE_TARGET, PM_DRIVE_RISK, "ORB daily"), f"{word} the 14:30 afternoon drive ({mv_pm:+.1f} from 13:00, $600)."
-            return None, f"Watching 14:30 afternoon drive: {mv_pm:+.1f} from 13:00 (needs 80 pts)."
-    return None, "Morning window complete. Watching 14:30 afternoon drive (Wed/Thu/Fri) if flat."
-
-
-def position_ticket(position, bid, ask):
-    buy = position.type == mt5.POSITION_TYPE_BUY
-    comment = (position.comment or "").strip() or "open trade"
-    return {
-        "symbol": position.symbol,
-        "side": "buy" if buy else "sell",
-        "volume": f"{float(position.volume):.2f}",
-        "sl": f"{float(position.sl):.2f}" if position.sl else "-",
-        "tp": f"{float(position.tp):.2f}" if position.tp else "-",
-        "comment": comment,
-        "sl_price": float(position.sl) or None,
-        "tp_price": float(position.tp) or None,
-        "entry_price": float(position.price_open),
-        "profit": float(position.profit),
-        "bid": f"{bid:.2f}",
-        "ask": f"{ask:.2f}",
-    }
-
-
-def empty_ticket(bid, ask):
-    return {
-        "symbol": "US100.cash",
-        "side": "",
-        "volume": "-",
-        "sl": "-",
-        "tp": "-",
-        "comment": "-",
-        "bid": f"{bid:.2f}" if bid else "-",
-        "ask": f"{ask:.2f}" if ask else "-",
-        "execution": "Market Execution",
-        "ok": True,
-        "status": "No order. The bot is flat.",
-    }
 
 
 def chart_bars(symbol, timeframe, count, offset):
@@ -555,11 +687,11 @@ def level(price, color, label, dash=False, name=""):
 
 
 def position_levels(position):
-    levels = [level(position.price_open, "#ffffff", f"{float(position.price_open):.2f}", name="entry")]
+    levels = [level(position.price_open, "#ffffff", f"{float(position.price_open):.2f}", name="Entry")]
     if position.sl:
-        levels.append(level(position.sl, "#ff3b30", f"{float(position.sl):.2f}", name="stop"))
+        levels.append(level(position.sl, "#f85149", f"{float(position.sl):.2f}", name="Stop"))
     if position.tp:
-        levels.append(level(position.tp, "#00c000", f"{float(position.tp):.2f}", name="target"))
+        levels.append(level(position.tp, "#3fb950", f"{float(position.tp):.2f}", name="Target"))
     return levels
 
 
@@ -574,26 +706,21 @@ def trade_row(position):
         "volume": f"{float(position.volume):.2f}",
         "price": f"{float(position.price_open):.2f}",
         "current": f"{current:.2f}",
-        "sl": f"{float(position.sl):.2f}" if position.sl else "",
-        "tp": f"{float(position.tp):.2f}" if position.tp else "",
+        "sl": f"{float(position.sl):.2f}" if position.sl else "—",
+        "tp": f"{float(position.tp):.2f}" if position.tp else "—",
         "profit": profit,
-        "profit_text": f"{profit:,.2f}",
+        "profit_text": f"{profit:+,.2f}",
     }
 
 
 def ohlc_line(bar):
     if not bar:
         return ""
-    return f"O {bar['o']:.2f}  H {bar['h']:.2f}  L {bar['l']:.2f}  C {bar['c']:.2f}"
+    return f"O {bar['o']:.2f}   H {bar['h']:.2f}   L {bar['l']:.2f}   C {bar['c']:.2f}"
 
 
 def day_name(now):
     return ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")[now.weekday()]
-
-
-def next_shot_day(now):
-    ahead = {1: "Wednesday", 5: "Monday", 6: "Monday"}
-    return ahead.get(now.weekday(), "Monday")
 
 
 def shot_day(now):
@@ -602,6 +729,10 @@ def shot_day(now):
 
 def fade10_day(now):
     return now.weekday() == 3
+
+
+def mod_fade_day(now):
+    return now.weekday() in (0, 1, 2)
 
 
 def pm_drive_day(now):
@@ -616,10 +747,10 @@ def clock_left(now, target_minute):
     minutes, seconds = divmod(left, 60)
     if minutes >= 60:
         hours, minutes = divmod(minutes, 60)
-        return f"{hours} h {minutes} min {seconds} sec"
+        return f"{hours}h {minutes}m"
     if minutes:
-        return f"{minutes} min {seconds} sec"
-    return f"{seconds} sec"
+        return f"{minutes}m {seconds}s"
+    return f"{seconds}s"
 
 
 def bar_closes_in(now, start_minute):
@@ -627,74 +758,25 @@ def bar_closes_in(now, start_minute):
     start_s = start_minute * 60
     if now_s < start_s or now_s >= start_s + 300:
         return None
-    return f"{start_s + 300 - now_s} sec"
+    return f"{start_s + 300 - now_s}s"
 
 
 def price_text(value):
     return f"{value:,.2f}"
 
 
-def open_930(bars):
+def open_at(bars, hhmm):
     for bar in bars:
-        if bar["t"] == "09:30":
+        if bar["t"] == hhmm:
             return bar["o"]
     return None
-
-
-def open_0300(bars):
-    for bar in bars:
-        if bar["t"] == "03:00":
-            return bar["o"]
-    return None
-
-
-def open_1300(bars):
-    for bar in bars:
-        if bar["t"] == "13:00":
-            return bar["o"]
-    return None
-
-
-def half_hour_move(bars):
-    closed = bars[:-1]
-    if len(closed) < 6:
-        return None
-    window = closed[-6:]
-    return window[-1]["c"] - window[0]["o"]
 
 
 def comment_of(position):
     return (position.comment or "").lower() if position is not None else ""
 
 
-def nasdaq_role(position, now):
-    if position is None:
-        return None
-    if owns(position, "hop"):
-        return "hop"
-    if owns(position, "fallback"):
-        return "fallback"
-    if owns(position, "shots"):
-        return "shots"
-    return "shots" if shot_day(now) else "fallback"
-
-
-def owns(position, key):
-    text = comment_of(position)
-    if position is None:
-        return False
-    if key == "fallback":
-        return "daily" in text
-    if key == "hop":
-        return "ride" in text
-    if key == "shots":
-        return "orb am" in text or "orb day" in text
-    if key == "gold":
-        return "gold" in text
-    return False
-
-
-def idea(id_name, name, state, side, lead, facts, lines):
+def idea(id_name, name, subtitle, state, side, lead, facts, lines):
     tone = {
         "Watching": "watching",
         "Getting close": "close",
@@ -706,6 +788,7 @@ def idea(id_name, name, state, side, lead, facts, lines):
     return {
         "id": id_name,
         "name": name,
+        "subtitle": subtitle,
         "state": state,
         "tone": tone,
         "side": side or "",
@@ -717,501 +800,264 @@ def idea(id_name, name, state, side, lead, facts, lines):
 
 def trade_facts(position, bid):
     side = "buy" if position.type == mt5.POSITION_TYPE_BUY else "sell"
-    word = "Buy" if side == "buy" else "Sell"
+    word = "BUY" if side == "buy" else "SELL"
     return side, word, [
-        {"label": "Bid", "value": price_text(bid)},
         {"label": "Entry", "value": price_text(float(position.price_open))},
-        {"label": "Stop", "value": price_text(float(position.sl)) if position.sl else "—"},
-        {"label": "Target", "value": price_text(float(position.tp)) if position.tp else "—"},
-        {"label": "Open result", "value": f"{float(position.profit):+,.2f}"},
-        {"label": "Volume", "value": f"{float(position.volume):.2f}"},
+        {"label": "Current", "value": price_text(bid)},
+        {"label": "Stop / TP", "value": f"{float(position.sl):.0f} / {float(position.tp):.0f}"},
+        {"label": "Open P&L", "value": f"${float(position.profit):+,.2f}"},
     ]
 
 
-def move_words(move, need):
-    if move is None:
-        return "The 09:30 open is not on the chart yet."
-    gone = abs(move)
-    way = "above" if move > 0 else "below" if move < 0 else "on"
-    short = need - gone
-    if move == 0:
-        return f"Price is on the 09:30 open. It needs {need:.1f} points."
-    if short > 0:
-        return f"Price is {gone:.1f} points {way} the open, {short:.1f} short of {need:.0f}."
-    return f"Price is {gone:.1f} points {way} the open. That clears {need:.0f}."
+def london_card(now, minutes, bid, bars, position):
+    sub = "08:30 UK (03:30 NY) · Mon–Fri · $660 Risk"
+    op3 = open_at(bars, "03:00")
+    mv = None if op3 is None else (bid - op3)
+    mv_txt = "—" if mv is None else f"{mv:+.1f} pts"
 
-
-def near_level(move, need):
-    if move is None:
-        return "Watching"
-    if abs(move) >= need:
-        return "met"
-    if abs(move) >= need * 0.67:
-        return "Getting close"
-    return "Watching"
-
-
-def board_line(now, ideas):
-    verbs = {
-        "Watching": ("is watching", "are watching"),
-        "Getting close": ("is getting close", "are getting close"),
-        "Ready": ("is ready", "are ready"),
-        "In a trade": ("is in a trade", "are in a trade"),
-        "Passed": ("has passed", "have passed"),
-        "Standing aside": ("is standing aside", "are standing aside"),
-    }
-    parts = []
-    for item in ideas:
-        plural = item["name"] == "Nasdaq shots"
-        parts.append(f"{item['name']} {verbs[item['state']][1 if plural else 0]}")
-    return f"{day_name(now)}. " + ". ".join(parts) + "."
-
-
-def shots_idea(now, minutes, bid, bars, position, trading):
-    move = None if open_930(bars) is None else bid - open_930(bars)
-    if nasdaq_role(position, now) == "shots":
+    if position is not None and "london" in comment_of(position):
         side, word, facts = trade_facts(position, bid)
-        return idea(
-            "shots", "Nasdaq shots", "In a trade", side,
-            f"{word} {float(position.volume):.2f} lots from {price_text(float(position.price_open))}.",
-            facts,
-            ["Red line is the stop. Green line is the target. 40% off at +1R & -0.60R cushion (+4R locks +1.5R, $1,100 risk)."],
-        )
-    if not shot_day(now):
-        return idea(
-            "shots", "Nasdaq shots", "Standing aside", "",
-            f"Today is {day_name(now)}. Trend shots run on Mon, Wed, Thu, and Fri.",
-            [
-                {"label": "Bid", "value": price_text(bid)},
-                {"label": "Needs", "value": "60 points"},
-                {"label": "Next", "value": next_shot_day(now)},
-                {"label": "From the open", "value": "—" if move is None else f"{move:+.1f}"},
-            ],
-            ["Thu 10:00 fades a 60+ pt move. Mon/Wed/Thu/Fri 11:00 rides a 60+ pt move."],
-        )
-    if minutes >= 11 * 60 + 5:
-        return idea(
-            "shots", "Nasdaq shots", "Passed", "",
-            move_words(move, SHOT_POINTS),
-            [
-                {"label": "Bid", "value": price_text(bid)},
-                {"label": "From the open", "value": "—" if move is None else f"{move:+.1f}"},
-                {"label": "Needed", "value": "60 points"},
-                {"label": "Window", "value": "closed"},
-            ],
-            ["The morning shot window has closed for today."],
-        )
-    weighing_11 = (not fade10_day(now)) or (minutes >= 10 * 60 + 5)
-    start = 11 * 60 if weighing_11 else 10 * 60
-    closes = bar_closes_in(now, start)
-    level = near_level(move, SHOT_POINTS)
-    if closes and level == "met":
-        state = "Ready"
-        side = ("buy" if move > 0 else "sell") if weighing_11 else ("sell" if move > 0 else "buy")
-        word = "Buy" if side == "buy" else "Sell"
-        action = "with the move" if weighing_11 else "the Thursday fade"
-        lead = f"Ready to {word.lower()} {action}."
-    elif level == "met":
-        state, side = "Getting close", ""
-        lead = move_words(move, SHOT_POINTS) + " Waiting for the bar to close."
-    elif level == "Getting close":
-        state, side = "Getting close", ""
-        lead = move_words(move, SHOT_POINTS)
-    else:
-        state, side = "Watching", ""
-        lead = move_words(move, SHOT_POINTS)
-    when = "11:00 goes with a 60+ pt move" if weighing_11 else "Thursday 10:00 fades a 60+ pt move"
-    facts = [
-        {"label": "Bid", "value": price_text(bid)},
-        {"label": "From the open", "value": "—" if move is None else f"{move:+.1f}"},
-        {"label": "Short of 60", "value": "—" if move is None else f"{max(0.0, SHOT_POINTS - abs(move)):.1f}"},
-        {"label": "Bar closes" if closes else f"{'11:00' if weighing_11 else '10:00'} in", "value": closes or clock_left(now, start)},
-    ]
-    lines = [f"{when}. Stop {SHOT_STOP:.0f}, target {SHOT_TARGET:.0f}, risk ${SHOT_RISK:.0f}."]
-    if weighing_11 and fade10_day(now) and minutes >= 10 * 60 + 5:
-        lines.append("The Thursday 10:00 fade has passed.")
-    if state == "Ready" and not trading:
-        lines.append("Trading is off on this login, so no order will be sent.")
-    return idea("shots", "Nasdaq shots", state, side, lead, facts, lines)
-
-
-def morning_pullback(bars, move, price):
-    seen = False
-    extreme = None
-    buy = move > 0
-    for bar in bars:
-        if bar["t"] == "09:30":
-            seen = True
-        if not seen:
-            continue
-        if extreme is None:
-            extreme = bar["h"] if buy else bar["l"]
-        else:
-            extreme = max(extreme, bar["h"]) if buy else min(extreme, bar["l"])
-    if extreme is None:
-        return None
-    if buy:
-        return max(extreme, price) - price
-    return price - min(extreme, price)
-
-
-def fallback_idea(now, minutes, bid, bars, position, trading):
-    opened = open_930(bars)
-    move = None if opened is None else bid - opened
-    role = nasdaq_role(position, now)
-    if role == "fallback":
-        side, word, facts = trade_facts(position, bid)
-        return idea(
-            "fallback", "11:00 range-fade", "In a trade", side,
-            f"{word} {float(position.volume):.2f} lots from {price_text(float(position.price_open))}.",
-            facts,
-            ["Half-shot ($660 risk). Stop 20, target 120 (or 100 on 14:30 afternoon drive)."],
-        )
-    if now.weekday() >= 5 or now.weekday() in (3, 4):
-        return idea(
-            "fallback", "11:00 range-fade", "Standing aside", "",
-            "The Nasdaq session is closed for the weekend." if now.weekday() >= 5 else "11:00 range-fade is Mon/Tue/Wed only (Thu/Fri reserved for 60+ pt shots).",
-            [{"label": "Bid", "value": price_text(bid)}, {"label": "Band", "value": "10..60 pts"}, {"label": "Stop", "value": "20"}, {"label": "Target", "value": "120"}],
-            ["Fades a 10..60 point morning range back toward the 09:30 open at 11:00 NY on Mon/Tue/Wed ($660 risk)."],
-        )
-    if role == "shots":
-        return idea(
-            "fallback", "11:00 range-fade", "Standing aside", "",
-            "A $1,000 Nasdaq shot has the account.",
-            [
-                {"label": "Bid", "value": price_text(bid)},
-                {"label": "From the open", "value": "—" if move is None else f"{move:+.1f}"},
-                {"label": "Band", "value": "10..60 pts"},
-                {"label": "11:00 in", "value": clock_left(now, 11 * 60)},
-            ],
-            ["The $600 range-fade waits unless the account is flat."],
-        )
-    if shot_day(now) and move is not None and abs(move) >= SHOT_POINTS and minutes <= 11 * 60 + 4:
-        return idea(
-            "fallback", "11:00 range-fade", "Standing aside", "",
-            "Morning move is 60+ points — that belongs to the $1,000 trend shot.",
-            [
-                {"label": "Bid", "value": price_text(bid)},
-                {"label": "From the open", "value": f"{move:+.1f}"},
-                {"label": "Band", "value": "10..60 pts"},
-                {"label": "Regime", "value": "Breakout (>=60)"},
-            ],
-            ["When 09:30->11:00 clears 60 points, we ride the breakout ($1,000). When it stays in 10..60 pts, we fade the range ($600)."],
-        )
-    if minutes >= 11 * 60 + 5:
-        return idea(
-            "fallback", "11:00 range-fade", "Passed", "",
-            move_words(move, FALLBACK_MIN) if move is not None else "The 11:00 bar has closed.",
-            [
-                {"label": "Bid", "value": price_text(bid)},
-                {"label": "From the open", "value": "—" if move is None else f"{move:+.1f}"},
-                {"label": "Band", "value": "10..60 pts"},
-                {"label": "Window", "value": "closed"},
-            ],
-            ["The 11:00 decision has passed for today."],
-        )
-    in_band = move is not None and FALLBACK_MIN <= abs(move) < SHOT_POINTS
-    closes = bar_closes_in(now, 11 * 60)
-    if closes and in_band:
-        side = "sell" if move > 0 else "buy"
-        word = "buy" if side == "buy" else "sell"
-        state, lead = "Ready", f"Ready to {word} (fade) the 11:00 range move ($600)."
-    elif in_band and minutes >= 10 * 60 + 30:
-        state, side = "Getting close", ""
-        lead = f"Price is {move:+.1f} pts from the 09:30 open (inside the 10..60 pt fade band)."
-    else:
-        state, side = "Watching", ""
-        lead = "Waiting for the 09:30 New York open." if move is None else f"Price is {move:+.1f} pts from 09:30 (fade band is 10..60 pts)."
-    lines = ["When 09:30->11:00 stays between 10 and 60 points, fade it back toward the open. Stop 20, target 120, risk $600."]
-    if state == "Ready" and not trading:
-        lines.append("Trading is off on this login, so no order will be sent.")
-    return idea(
-        "fallback", "11:00 range-fade", state, side, lead,
-        [
-            {"label": "Bid", "value": price_text(bid)},
-            {"label": "From the open", "value": "—" if move is None else f"{move:+.1f}"},
-            {"label": "Band", "value": "10..60 pts"},
-            {"label": "11:00 in" if not closes else "Bar closes", "value": closes or clock_left(now, 11 * 60)},
-        ],
-        lines,
-    )
-
-
-def hop_idea(now, bid, bars, position):
-    op13 = open_1300(bars)
-    mv_pm = None if op13 is None else bid - op13
-    move_text = "—" if mv_pm is None else f"{mv_pm:+.1f}"
-    minutes = now.hour * 60 + now.minute
-    if owns(position, "hop"):
-        side, word, facts = trade_facts(position, bid)
-        return idea(
-            "hop", "14:30 afternoon drive", "In a trade", side,
-            f"{word} {float(position.volume):.2f} lots from {price_text(float(position.price_open))}.",
-            facts,
-            ["Afternoon continuation ($600 risk, stop 20, target 100)."],
-        )
-    if not pm_drive_day(now):
-        return idea(
-            "hop", "14:30 afternoon drive", "Standing aside", "",
-            f"Today is {day_name(now)}. The 14:30 drive runs Wed, Thu, and Fri.",
-            [
-                {"label": "Bid", "value": price_text(bid)},
-                {"label": "Since 13:00", "value": move_text},
-                {"label": "Needs", "value": "80 points"},
-                {"label": "Days", "value": "Wed Thu Fri"},
-            ],
-            ["On Wed/Thu/Fri, if flat at 14:30 and price has moved 80+ pts from 13:00, ride it ($600 risk)."],
-        )
-    if minutes >= 14 * 60 + 35:
-        return idea(
-            "hop", "14:30 afternoon drive", "Passed", "",
-            "The 14:30 afternoon checkpoint has passed.",
-            [
-                {"label": "Bid", "value": price_text(bid)},
-                {"label": "Since 13:00", "value": move_text},
-                {"label": "Needed", "value": "80 points"},
-                {"label": "Window", "value": "closed"},
-            ],
-            ["Positions flatten at 15:55 New York."],
-        )
-    closes = bar_closes_in(now, 14 * 60 + 30)
-    level = near_level(mv_pm, PM_DRIVE_POINTS)
-    if closes and level == "met" and position is None:
-        side = "buy" if mv_pm > 0 else "sell"
-        state = "Ready"
-        lead = f"Ready to {side} the 14:30 afternoon drive ({mv_pm:+.1f} pts since 13:00)."
-    elif level in ("met", "Getting close"):
-        state, side = "Getting close", ""
-        lead = move_words(mv_pm, PM_DRIVE_POINTS)
-    else:
-        state, side = "Watching", ""
-        lead = "Waiting for the 13:00 afternoon open." if mv_pm is None else f"Since 13:00: {mv_pm:+.1f} pts (needs 80 pts at 14:30)."
-    return idea(
-        "hop", "14:30 afternoon drive", state, side, lead,
-        [
-            {"label": "Bid", "value": price_text(bid)},
-            {"label": "Since 13:00", "value": move_text},
-            {"label": "Needs", "value": "80 points"},
-            {"label": "14:30 in" if not closes else "Bar closes", "value": closes or clock_left(now, 14 * 60 + 30)},
-        ],
-        ["Wed/Thu/Fri at 14:30 NY: if flat and 13:00->14:30 moved 80+ pts, go with it. Stop 20, target 100, risk $600."],
-    )
-
-
-def gold_used(now):
-    """Gold trades taken today, on the New York day, from deal history.
-
-    The bot keeps its own count in a terminal global variable, but the
-    Python library has no way to read those, and the old code quietly
-    reported 0 forever. Opening gold deals can be read, so count those.
-    Deal times come back on the broker clock, like the bars.
-    """
-    try:
-        tick = mt5.symbol_info_tick(GOLD)
-        if tick is None:
-            return 0
-        offset = server_offset_hours(tick.time)
-        start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc) - timedelta(days=1)
-        deals = mt5.history_deals_get(start, start + timedelta(days=3))
-        if not deals:
-            return 0
-        used = 0
-        for deal in deals:
-            if deal.symbol != GOLD or int(deal.magic) != MAGIC:
-                continue
-            if int(deal.entry) != int(mt5.DEAL_ENTRY_IN):
-                continue
-            real_utc = datetime.fromtimestamp(int(deal.time) - offset * 3600, timezone.utc)
-            opened_ny = (real_utc + timedelta(hours=-4)).replace(tzinfo=None)
-            if opened_ny.date() == now.date():
-                used += 1
-        return used
-    except Exception:
-        return 0
-
-
-def gold_idea(now, minutes, trading, nasdaq_open, position, bid, ask, closed, nas_bars=None, nas_bid=None, nas_pos=None):
-    op3 = open_0300(nas_bars or [])
-    mv_lon = None if (op3 is None or nas_bid is None) else (nas_bid - op3)
-    move_text = "—" if mv_lon is None else f"{mv_lon:+.1f}"
-    if nas_pos is not None and "london" in comment_of(nas_pos):
-        side, word, facts = trade_facts(nas_pos, nas_bid if nas_bid is not None else float(nas_pos.price_open))
-        return idea(
-            "gold", "08:30 UK London fade", "In a trade", side,
-            f"{word} {float(nas_pos.volume):.2f} lots from {price_text(float(nas_pos.price_open))}.",
-            facts,
-            ["US100.cash London Open fade ($600 risk, stop 15, target 90). Closes by 14:20 UK (09:20 NY)."],
-        )
+        return idea("london", "1. London Range-Fade", sub, "In a trade", side,
+                    f"{word} {float(position.volume):.2f} lots open.", facts,
+                    ["Stop 15 pts, target 90 pts. Flattens by 14:20 UK (09:20 NY)."])
     if now.weekday() >= 5:
-        return idea(
-            "gold", "08:30 UK London fade", "Standing aside", "",
-            "London session is closed for the weekend.",
-            [{"label": "US100 Bid", "value": "—" if nas_bid is None else price_text(nas_bid)}, {"label": "Band", "value": "5..30 pts"}, {"label": "Stop / Target", "value": "15 / 90"}, {"label": "Risk", "value": "$660"}],
-            ["Fades a 5..30 pt drift between 08:00 and 08:30 UK (03:00->03:30 NY) on US100.cash."],
-        )
+        return idea("london", "1. London Range-Fade", sub, "Standing aside", "",
+                    "Weekend — resumes Monday at 08:30 UK.",
+                    [{"label": "Band", "value": "5..30 pts"}, {"label": "Stop / TP", "value": "15 / 90"},
+                     {"label": "Risk", "value": "$660"}, {"label": "Full TP", "value": "+$2,640"}],
+                    ["Fades a 5..30 pt drift from 08:00 to 08:30 UK back toward the London open."])
     if minutes >= 3 * 60 + 35:
-        return idea(
-            "gold", "08:30 UK London fade", "Passed", "",
-            "The 08:30 UK (03:30 NY) London Open trade has been judged for today.",
-            [
-                {"label": "US100 Bid", "value": "—" if nas_bid is None else price_text(nas_bid)},
-                {"label": "Since 08:00 UK", "value": move_text},
-                {"label": "Band", "value": "5..30 pts"},
-                {"label": "Window", "value": "closed"},
-            ],
-            ["Any open London trade flattens at 14:20 UK (09:20 NY) before Wall Street opens."],
-        )
+        return idea("london", "1. London Range-Fade", sub, "Passed", "",
+                    "08:30 UK London window has completed for today.",
+                    [{"label": "08:00 Open", "value": "—" if op3 is None else price_text(op3)},
+                     {"label": "Since 08:00", "value": mv_txt},
+                     {"label": "Band", "value": "5..30 pts"},
+                     {"label": "Status", "value": "Done today"}],
+                    ["Any open London trade closes automatically at 14:20 UK before New York opens."])
     closes = bar_closes_in(now, 3 * 60 + 30)
-    in_band = mv_lon is not None and LONDON_MIN <= abs(mv_lon) < LONDON_MAX
-    if closes and in_band and nas_pos is None:
-        side = "sell" if mv_lon > 0 else "buy"
-        state = "Ready"
-        lead = f"Ready to {side} (fade) the 08:30 UK London drift ({mv_lon:+.1f} pts)."
+    in_band = mv is not None and LONDON_MIN <= abs(mv) < LONDON_MAX
+    if closes and in_band and position is None:
+        side = "sell" if mv > 0 else "buy"
+        state, lead = "Ready", f"Ready to {side.upper()} (fade) the {mv:+.1f} pt London move."
     elif in_band and minutes >= 3 * 60:
-        state, side = "Getting close", ""
-        lead = f"US100 is {mv_lon:+.1f} pts from 08:00 UK open (inside the 5..30 pt fade band)."
+        state, side, lead = "Getting close", "", f"Move is {mv:+.1f} pts (inside 5..30 pt fade band)."
     else:
         state, side = "Watching", ""
-        lead = "Waiting for 08:00 UK (03:00 NY) London open." if mv_lon is None else f"Since 08:00 UK: {mv_lon:+.1f} pts (fade band is 5..30 pts at 08:30 UK)."
-    return idea(
-        "gold", "08:30 UK London fade", state, side, lead,
-        [
-            {"label": "US100 Bid", "value": "—" if nas_bid is None else price_text(nas_bid)},
-            {"label": "Since 08:00 UK", "value": move_text},
-            {"label": "Band", "value": "5..30 pts"},
-            {"label": "08:30 UK in" if not closes else "Bar closes", "value": closes or clock_left(now, 3 * 60 + 30)},
-        ],
-        ["All 5 weekdays at 08:30 UK (03:30 NY): fade a 5..30 pt London drift on US100.cash. Stop 15, target 90, risk $600."],
-    )
+        lead = "Waiting for 08:00 UK open." if mv is None else f"Move since 08:00 UK: {mv:+.1f} pts (needs 5..30 pts)."
+    return idea("london", "1. London Range-Fade", sub, state, side, lead,
+                [{"label": "Since 08:00 UK", "value": mv_txt}, {"label": "Fade Band", "value": "5..30 pts"},
+                 {"label": "Stop / TP", "value": "15 / 90 pts"},
+                 {"label": "08:30 UK in", "value": closes or clock_left(now, 3 * 60 + 30)}],
+                ["All 5 weekdays: fades a 5..30 pt London open drift ($660 risk, Full TP +$2,640)."])
 
 
-def nas_view(now, minutes, bid, ask, bars, trading, position):
-    open930 = None
-    for bar in bars:
-        hour, minute = bar["t"].split(":")
-        if hour == "09" and minute == "30":
-            open930 = bar["o"]
-    move = None if open930 is None else bid - open930
-    is_shot_day = shot_day(now)
-    order, why = wanted_order(move, minutes, bars, bid, ask, is_shot_day, now=now)
-    levels = []
-    if open930 is not None:
-        levels.append(level(open930, "#ffd700", f"{open930:.2f}"))
-        levels.append(level(open930 + SHOT_POINTS, "#8a8a8a", f"{open930 + SHOT_POINTS:.2f}", True))
-        levels.append(level(open930 - SHOT_POINTS, "#8a8a8a", f"{open930 - SHOT_POINTS:.2f}", True))
-    lines = []
-    if fade10_day(now):
-        lines.append("Thursday: 10:00 fades 60+ pt move ($2.4k). 11:00 rides 60+ pt ($2.4k) or fades 10..60 pt ($1.4k). 14:30 rides 80+ pt PM drive ($1.4k).")
-    elif is_shot_day:
-        lines.append("Shot day: 11:00 rides 60+ pt ($2.4k) or fades 10..60 pt ($1.4k).")
+def thu10_card(now, minutes, bid, bars, position):
+    sub = "15:00 UK (10:00 NY) · Thursday Only · $1,100 Risk"
+    op930 = open_at(bars, "09:30")
+    mv = None if op930 is None else (bid - op930)
+    mv_txt = "—" if mv is None else f"{mv:+.1f} pts"
+
+    if position is not None and "day" in comment_of(position) and fade10_day(now) and minutes < 11 * 60:
+        side, word, facts = trade_facts(position, bid)
+        return idea("thu10", "2. Thu 10am Snapback", sub, "In a trade", side,
+                    f"{word} {float(position.volume):.2f} lots open.", facts,
+                    ["Thursday 15:00 UK snapback fade. Stop 20 pts, target 155 pts."])
+    if not fade10_day(now):
+        return idea("thu10", "2. Thu 10am Snapback", sub, "Standing aside", "",
+                    f"Today is {day_name(now)} — this setup only fires on Thursdays.",
+                    [{"label": "Day", "value": "Thursday only"}, {"label": "Trigger", "value": "60+ pts"},
+                     {"label": "Stop / TP", "value": "20 / 155 pts"}, {"label": "Full TP", "value": "+$5,555"}],
+                    ["Fades an exhausted 60+ pt surge in the first 30 mins of NY on Thursdays."])
+    if minutes >= 10 * 60 + 5:
+        return idea("thu10", "2. Thu 10am Snapback", sub, "Passed", "",
+                    "15:00 UK (10:00 NY) window has passed for today.",
+                    [{"label": "Since 14:30 UK", "value": mv_txt}, {"label": "Needed", "value": "60+ pts"},
+                     {"label": "Stop / TP", "value": "20 / 155"}, {"label": "Status", "value": "Done today"}],
+                    ["Next check today is the 16:00 UK (11:00 NY) Big Trend Shot."])
+    closes = bar_closes_in(now, 10 * 60)
+    met = mv is not None and abs(mv) >= SHOT_POINTS
+    if closes and met and position is None:
+        side = "sell" if mv > 0 else "buy"
+        state, lead = "Ready", f"Ready to {side.upper()} (fade) the {mv:+.1f} pt opening spike."
+    elif mv is not None and abs(mv) >= 40.0:
+        state, side, lead = "Getting close", "", f"Move is {mv:+.1f} pts since 14:30 UK (needs 60 pts)."
     else:
-        lines.append("Tuesday: 11:00 fades a 10..60 pt range move ($600).")
+        state, side = "Watching", ""
+        lead = "Waiting for 14:30 UK NY open." if mv is None else f"Since 14:30 UK: {mv:+.1f} pts (needs 60+ pts)."
+    return idea("thu10", "2. Thu 10am Snapback", sub, state, side, lead,
+                [{"label": "Since 14:30 UK", "value": mv_txt}, {"label": "Needs", "value": "60+ pts"},
+                 {"label": "Stop / TP", "value": "20 / 155 pts"},
+                 {"label": "15:00 UK in", "value": closes or clock_left(now, 10 * 60)}],
+                ["Thursdays at 15:00 UK: fades a 60+ pt 30-minute spike ($1,100 risk, Full TP +$5,555)."])
+
+
+def shot11_card(now, minutes, bid, bars, position):
+    sub = "16:00 UK (11:00 NY) · Mon/Wed/Thu/Fri · $1,100 Risk"
+    op930 = open_at(bars, "09:30")
+    mv = None if op930 is None else (bid - op930)
+    mv_txt = "—" if mv is None else f"{mv:+.1f} pts"
+
+    if position is not None and "day" in comment_of(position) and minutes >= 11 * 60:
+        side, word, facts = trade_facts(position, bid)
+        return idea("shot11", "3. 11am Big Trend Shot", sub, "In a trade", side,
+                    f"{word} {float(position.volume):.2f} lots open.", facts,
+                    ["40% banked at +1R (-0.6R cushion), +4R locks +1.5R, target 155 pts (+$5,555)."])
+    if not shot_day(now):
+        return idea("shot11", "3. 11am Big Trend Shot", sub, "Standing aside", "",
+                    f"Today is {day_name(now)} — Trend Shots run Mon, Wed, Thu, Fri.",
+                    [{"label": "Days", "value": "Mon Wed Thu Fri"}, {"label": "Trigger", "value": "60+ pts"},
+                     {"label": "Stop / TP", "value": "20 / 155 pts"}, {"label": "Full TP", "value": "+$5,555"}],
+                    ["On Tuesday, 16:00 UK only trades the 10..60 pt Range-Fade."])
+    if minutes >= 11 * 60 + 5:
+        return idea("shot11", "3. 11am Big Trend Shot", sub, "Passed", "",
+                    "16:00 UK (11:00 NY) window has completed for today.",
+                    [{"label": "Since 14:30 UK", "value": mv_txt}, {"label": "Needed", "value": "60+ pts"},
+                     {"label": "Stop / TP", "value": "20 / 155"}, {"label": "Status", "value": "Done today"}],
+                    ["Rides 60+ pt morning breakouts in the direction of the trend."])
+    closes = bar_closes_in(now, 11 * 60)
+    met = mv is not None and abs(mv) >= SHOT_POINTS
+    if closes and met and position is None:
+        side = "buy" if mv > 0 else "sell"
+        state, lead = "Ready", f"Ready to {side.upper()} with the {mv:+.1f} pt breakout."
+    elif mv is not None and abs(mv) >= 40.0:
+        state, side, lead = "Getting close", "", f"Move is {mv:+.1f} pts since 14:30 UK (needs 60+ pts)."
+    else:
+        state, side = "Watching", ""
+        lead = "Waiting for 14:30 UK NY open." if mv is None else f"Since 14:30 UK: {mv:+.1f} pts (needs 60+ pts)."
+    return idea("shot11", "3. 11am Big Trend Shot", sub, state, side, lead,
+                [{"label": "Since 14:30 UK", "value": mv_txt}, {"label": "Needs", "value": "60+ pts"},
+                 {"label": "Stop / TP", "value": "20 / 155 pts"},
+                 {"label": "16:00 UK in", "value": closes or clock_left(now, 11 * 60)}],
+                ["Mon/Wed/Thu/Fri at 16:00 UK: rides a 60+ pt breakout ($1,100 risk, Full TP +$5,555)."])
+
+
+def fade11_card(now, minutes, bid, bars, position):
+    sub = "16:00 UK (11:00 NY) · Mon/Tue/Wed · $660 Risk"
+    op930 = open_at(bars, "09:30")
+    mv = None if op930 is None else (bid - op930)
+    mv_txt = "—" if mv is None else f"{mv:+.1f} pts"
+
+    if position is not None and "daily" in comment_of(position) and minutes < 14 * 60 + 30:
+        side, word, facts = trade_facts(position, bid)
+        return idea("fade11", "4. 11am Range-Fade", sub, "In a trade", side,
+                    f"{word} {float(position.volume):.2f} lots open.", facts,
+                    ["Mon/Tue/Wed 10..60 pt range-fade. Stop 20 pts, target 120 pts (+$2,640)."])
+    if not mod_fade_day(now):
+        return idea("fade11", "4. 11am Range-Fade", sub, "Standing aside", "",
+                    f"Today is {day_name(now)} — 11am Range-Fade runs Mon/Tue/Wed only.",
+                    [{"label": "Days", "value": "Mon Tue Wed"}, {"label": "Band", "value": "10..60 pts"},
+                     {"label": "Stop / TP", "value": "20 / 120 pts"}, {"label": "Full TP", "value": "+$2,640"}],
+                    ["Skipped on Thu/Fri because Thu/Fri mornings trend into the afternoon."])
+    if minutes >= 11 * 60 + 5:
+        return idea("fade11", "4. 11am Range-Fade", sub, "Passed", "",
+                    "16:00 UK (11:00 NY) window has completed for today.",
+                    [{"label": "Since 14:30 UK", "value": mv_txt}, {"label": "Band", "value": "10..60 pts"},
+                     {"label": "Stop / TP", "value": "20 / 120"}, {"label": "Status", "value": "Done today"}],
+                    ["Fades moderate 10..60 pt morning moves back toward the 14:30 UK open."])
+    closes = bar_closes_in(now, 11 * 60)
+    in_band = mv is not None and FALLBACK_MIN <= abs(mv) < SHOT_POINTS
+    if closes and in_band and position is None:
+        side = "sell" if mv > 0 else "buy"
+        state, lead = "Ready", f"Ready to {side.upper()} (fade) the {mv:+.1f} pt range move."
+    elif in_band and minutes >= 10 * 60 + 30:
+        state, side, lead = "Getting close", "", f"Move is {mv:+.1f} pts (inside 10..60 pt fade band)."
+    else:
+        state, side = "Watching", ""
+        lead = "Waiting for 14:30 UK NY open." if mv is None else f"Since 14:30 UK: {mv:+.1f} pts (band is 10..60 pts)."
+    return idea("fade11", "4. 11am Range-Fade", sub, state, side, lead,
+                [{"label": "Since 14:30 UK", "value": mv_txt}, {"label": "Fade Band", "value": "10..60 pts"},
+                 {"label": "Stop / TP", "value": "20 / 120 pts"},
+                 {"label": "16:00 UK in", "value": closes or clock_left(now, 11 * 60)}],
+                ["Mon/Tue/Wed at 16:00 UK: fades a 10..60 pt morning drift ($660 risk, Full TP +$2,640)."])
+
+
+def pm1430_card(now, minutes, bid, bars, position):
+    sub = "19:30 UK (14:30 NY) · Wed/Thu/Fri · $660 Risk"
+    op13 = open_at(bars, "13:00")
+    mv = None if op13 is None else (bid - op13)
+    mv_txt = "—" if mv is None else f"{mv:+.1f} pts"
+
+    if position is not None and "daily" in comment_of(position) and minutes >= 14 * 60 + 30:
+        side, word, facts = trade_facts(position, bid)
+        return idea("pm1430", "5. 14:30 PM Drive", sub, "In a trade", side,
+                    f"{word} {float(position.volume):.2f} lots open.", facts,
+                    ["Afternoon power-hour continuation. Stop 20 pts, target 100 pts (+$2,244)."])
+    if not pm_drive_day(now):
+        return idea("pm1430", "5. 14:30 PM Drive", sub, "Standing aside", "",
+                    f"Today is {day_name(now)} — Afternoon Drive runs Wed, Thu, Fri.",
+                    [{"label": "Days", "value": "Wed Thu Fri"}, {"label": "Trigger", "value": "80+ pts"},
+                     {"label": "Stop / TP", "value": "20 / 100 pts"}, {"label": "Full TP", "value": "+$2,244"}],
+                    ["Rides strong 80+ pt afternoon trends from 18:00 UK into the 20:55 UK close."])
+    if minutes >= 14 * 60 + 35:
+        return idea("pm1430", "5. 14:30 PM Drive", sub, "Passed", "",
+                    "19:30 UK (14:30 NY) window has completed for today.",
+                    [{"label": "Since 18:00 UK", "value": mv_txt}, {"label": "Needed", "value": "80+ pts"},
+                     {"label": "Stop / TP", "value": "20 / 100"}, {"label": "Status", "value": "Done today"}],
+                    ["All open trades flatten at 20:55 UK (15:55 NY)."])
+    closes = bar_closes_in(now, 14 * 60 + 30)
+    met = mv is not None and abs(mv) >= PM_DRIVE_POINTS
+    if closes and met and position is None:
+        side = "buy" if mv > 0 else "sell"
+        state, lead = "Ready", f"Ready to {side.upper()} the {mv:+.1f} pt afternoon drive."
+    elif mv is not None and abs(mv) >= 55.0:
+        state, side, lead = "Getting close", "", f"Move since 18:00 UK is {mv:+.1f} pts (needs 80+ pts)."
+    else:
+        state, side = "Watching", ""
+        lead = "Waiting for 18:00 UK (13:00 NY) open." if mv is None else f"Since 18:00 UK: {mv:+.1f} pts (needs 80+ pts)."
+    return idea("pm1430", "5. 14:30 PM Drive", sub, state, side, lead,
+                [{"label": "Since 18:00 UK", "value": mv_txt}, {"label": "Needs", "value": "80+ pts"},
+                 {"label": "Stop / TP", "value": "20 / 100 pts"},
+                 {"label": "19:30 UK in", "value": closes or clock_left(now, 14 * 60 + 30)}],
+                ["Wed/Thu/Fri at 19:30 UK: rides an 80+ pt drive since 18:00 UK if flat ($660 risk)."])
+
+
+def board_summary(now, uk, ideas, position):
     if position is not None:
-        state, tone, side = "In trade", "in", "buy" if position.type == mt5.POSITION_TYPE_BUY else "sell"
-        lines.append(f"{side.title()} {float(position.volume):.2f} at {float(position.price_open):.2f}.")
-        lines.append("Red line is the stop. Green line is the target.")
-        levels = position_levels(position) + [lv for lv in levels if lv["color"] == "#ffd700" or lv["dash"]]
-    elif order is not None:
-        side = order["side"]
-        state = "Ready" if trading else "Blocked"
-        tone = "ready" if trading else "block"
-        lines.append(why)
-        lines.append(f"Stop {order['sl']}  Target {order['tp']}  Risk ${SHOT_RISK if 'am' in order['comment'] or order['comment']=='ORB day' else FALLBACK_RISK:.0f}.")
-        levels.append(level(order["entry_price"], "#ffffff", f"{order['entry_price']:.2f}"))
-        levels.append(level(order["sl_price"], "#ff3b30", order["sl"]))
-        levels.append(level(order["tp_price"], "#00c000", order["tp"]))
-    else:
-        side = ""
-        if minutes > 11 * 60:
-            state, tone = "Done", "off"
-        else:
-            state, tone = "Waiting", "wait"
-        lines.append(why)
-    if move is not None:
-        lines.append(f"Since 09:30: {move:+.1f} points. The shot lines are 60 either side.")
-    else:
-        lines.append("The 09:30 open is not on the chart yet.")
-    if not trading:
-        lines.append("Trading is off on this login. No new order will be sent.")
+        side = "BUY" if position.type == mt5.POSITION_TYPE_BUY else "SELL"
+        return f"ACTIVE TRADE: {side} {float(position.volume):.2f} lots on US100.cash at {float(position.price_open):.2f} (Open P&L: ${float(position.profit):+,.2f})"
+    active = [c for c in ideas if c["state"] in ("Ready", "Getting close", "Watching")]
+    if active:
+        nxt = active[0]
+        return f"{day_name(now)} · Next Active Setup: {nxt['name']} ({nxt['subtitle']}) — {nxt['lead']}"
+    return f"{day_name(now)} · All trading windows for today have completed. Next window: Tomorrow 08:30 UK London Open Fade."
+
+
+def nas_view(now, minutes, bid, ask, spread_pts, bars, position):
+    open0300 = open_at(bars, "03:00")
+    open930 = open_at(bars, "09:30")
+    open1300 = open_at(bars, "13:00")
+    levels = []
+    if open0300 is not None and minutes < 9 * 60 + 30:
+        levels.append(level(open0300, "#58a6ff", f"{open0300:.2f}", name="08:00 UK London Open"))
+    if open930 is not None:
+        levels.append(level(open930, "#e3b341", f"{open930:.2f}", name="14:30 UK (09:30 NY) Open"))
+        levels.append(level(open930 + SHOT_POINTS, "#8b949e", f"{open930 + SHOT_POINTS:.2f}", True, "+60 Shot"))
+        levels.append(level(open930 - SHOT_POINTS, "#8b949e", f"{open930 - SHOT_POINTS:.2f}", True, "-60 Shot"))
+    if open1300 is not None and minutes >= 13 * 60:
+        levels.append(level(open1300, "#a371f7", f"{open1300:.2f}", True, "18:00 UK (13:00 NY) Open"))
+    if position is not None:
+        levels = position_levels(position) + levels
     last = bars[-1] if bars else None
     return {
         "id": "nas",
-        "title": "US100.cash, M5",
-        "bid": f"{bid:.2f}",
-        "ask": f"{ask:.2f}",
-        "bars": bars[-60:],
+        "title": "US100.cash · M5 Live Chart",
+        "bid": f"{bid:,.2f}",
+        "ask": f"{ask:,.2f}",
+        "spread": f"{spread_pts:.1f} pts",
+        "bars": bars[-84:],
         "levels": levels,
-        "note": "US100.cash,M5\n" + ohlc_line(last),
-        "thinking": {"market": "Nasdaq", "state": state, "tone": tone, "side": side, "lines": lines},
-    }
-
-
-def gold_view(now, minutes, trading, nasdaq_open, position):
-    lines = []
-    levels = []
-    side = ""
-    state, tone = "Off", "off"
-    bid = ask = None
-    bars = []
-    closed = None
-    if not mt5.symbol_select(GOLD, True):
-        lines.append("XAUUSD is not on this account.")
-    else:
-        tick = mt5.symbol_info_tick(GOLD)
-        if tick is not None:
-            bid = float(tick.bid)
-            ask = float(tick.ask)
-            offset = server_offset_hours(tick.time)
-            bars = chart_bars(GOLD, mt5.TIMEFRAME_M1, 80, offset)
-        closed = mt5.copy_rates_from_pos(GOLD, mt5.TIMEFRAME_M1, 1, 3)
-        if position is not None:
-            state, tone = "In trade", "in"
-            side = "buy" if position.type == mt5.POSITION_TYPE_BUY else "sell"
-            lines.append(f"{side.title()} {float(position.volume):.2f} from {float(position.price_open):.2f}.")
-            lines.append("It stands down at 16:00 New York, or sooner if a Nasdaq shot needs the account.")
-            levels = position_levels(position)
-        elif position is None:
-            state, tone = "Off", "off"
-            lines.append("Gold scalping is turned off.")
-    if not trading and state not in ("In trade",):
-        lines.append("Trading is off on this login.")
-        if state == "Ready":
-            state, tone = "Blocked", "block"
-    last = bars[-1] if bars else None
-    return {
-        "id": "gold",
-        "title": "XAUUSD, M1",
-        "bid": f"{bid:.2f}" if bid is not None else "-",
-        "ask": f"{ask:.2f}" if ask is not None else "-",
-        "bars": bars[-70:],
-        "levels": levels,
-        "note": "XAUUSD,M1\n" + ohlc_line(last),
-        "thinking": gold_idea(now, minutes, trading, nasdaq_open, position, bid, ask, closed),
+        "note": "US100.cash, M5\n" + ohlc_line(last),
     }
 
 
 def blank_snapshot(message):
-    empty = {
-        "bars": [],
-        "levels": [],
-        "bid": "-",
-        "ask": "-",
-        "note": message,
-    }
     return {
-        "symbol_line": "",
-        "account_html": esc_text(message),
-        "charts": [
-            {"id": "nas", "title": "US100.cash, M5", **empty},
-            {"id": "gold", "title": "XAUUSD, M1", **empty},
-        ],
+        "uk_clock": "--:--:--",
+        "ny_clock": "--:--:--",
+        "metrics": [],
+        "charts": [{"id": "nas", "title": "US100.cash · M5", "bars": [], "levels": [], "bid": "-", "ask": "-", "spread": "-", "note": message}],
         "board": message,
-        "thinking": [
-            idea("shots", "Nasdaq shots", "Watching", "", message, [], [message]),
-            idea("fallback", "11:00 fallback", "Watching", "", message, [], [message]),
-            idea("hop", "The hop", "Watching", "", message, [], [message]),
-            idea("gold", "Gold scalp", "Watching", "", message, [], [message]),
-        ],
+        "thinking": [],
         "trades": [],
         "journal": journal_lines(),
     }
@@ -1219,50 +1065,55 @@ def blank_snapshot(message):
 
 def snapshot_now():
     if mt5.terminal_info() is None and not mt5.initialize(timeout=1500):
-        return blank_snapshot("MetaTrader is waiting for the login")
+        return blank_snapshot("MetaTrader 5 is waiting for connection...")
     tick = mt5.symbol_info_tick(SYMBOL)
     info = mt5.account_info()
     if tick is None:
-        return blank_snapshot("No US100.cash prices yet")
+        return blank_snapshot("Waiting for US100.cash quotes...")
     offset = server_offset_hours(tick.time)
     now = ny_now()
+    uk = uk_now()
     minutes = now.hour * 60 + now.minute
     bid = float(tick.bid)
     ask = float(tick.ask)
-    bars = chart_bars(SYMBOL, mt5.TIMEFRAME_M5, 160, offset)
+    spread_pts = ask - bid
+    bars = chart_bars(SYMBOL, mt5.TIMEFRAME_M5, 180, offset)
     nas_positions = [p for p in (mt5.positions_get(symbol=SYMBOL) or []) if p.magic == MAGIC]
-    gold_positions = [p for p in (mt5.positions_get(symbol=GOLD) or []) if p.magic == MAGIC]
     trading = bool(info.trade_allowed) if info is not None else False
     nas_position = nas_positions[0] if nas_positions else None
-    nas = nas_view(now, minutes, bid, ask, bars, trading, nas_position)
-    gold = gold_view(now, minutes, trading, bool(nas_positions), gold_positions[0] if gold_positions else None)
-    london_card = gold_idea(now, minutes, trading, bool(nas_positions), gold_positions[0] if gold_positions else None, None, None, None, nas_bars=bars, nas_bid=bid, nas_pos=nas_position)
+
+    nas = nas_view(now, minutes, bid, ask, spread_pts, bars, nas_position)
     ideas = [
-        london_card,
-        shots_idea(now, minutes, bid, bars, nas_position, trading),
-        fallback_idea(now, minutes, bid, bars, nas_position, trading),
-        hop_idea(now, bid, bars, nas_position),
+        london_card(now, minutes, bid, bars, nas_position),
+        thu10_card(now, minutes, bid, bars, nas_position),
+        shot11_card(now, minutes, bid, bars, nas_position),
+        fade11_card(now, minutes, bid, bars, nas_position),
+        pm1430_card(now, minutes, bid, bars, nas_position),
     ]
-    balance = float(info.balance) if info is not None else 0.0
-    if info is None:
-        account = "MetaTrader is not connected"
-    else:
-        flag = "trading disabled" if not trading else "trading enabled"
-        account = (
-            f"Balance <b>{balance:,.2f}</b> USD  {esc_text(info.name)}  "
-            f"<span class=\"{'bad' if not trading else 'good'}\">{flag}</span>"
-        )
-    trades = [trade_row(p) for p in nas_positions + gold_positions]
+
+    balance = float(info.balance) if info is not None else 100000.0
+    equity = float(info.equity) if info is not None else balance
+    open_pnl = equity - balance
+    floor_room = equity - 90000.0
+    target_room = 110000.0 - equity
+
+    metrics = [
+        {"label": "Account Balance", "value": f"${balance:,.2f}", "sub": info.name if info else "FTMO $100k", "cls": ""},
+        {"label": "Live Equity", "value": f"${equity:,.2f}", "sub": f"Open P&L: ${open_pnl:+,.2f}", "cls": "good" if open_pnl >= 0 else "bad"},
+        {"label": "FTMO $90k Floor Cushion", "value": f"${floor_room:,.2f}", "sub": "Hard floor: $90,000 (Bot stops at $91k)", "cls": "good" if floor_room >= 5000 else "warn"},
+        {"label": "Daily Loss Limit", "value": "$4,200 Cap", "sub": "FTMO Max Daily Loss: $5,000", "cls": ""},
+        {"label": "2-Stage Smart Runner", "value": "40% @ +1R", "sub": "Stop -> -0.60R (+$44/$26 min) · +4R -> +1.5R", "cls": "good"},
+        {"label": "Execution Status", "value": "TRADING LIVE" if trading else "DISABLED", "sub": f"Magic {MAGIC} · US100.cash Only", "cls": "good" if trading else "bad"},
+    ]
+
     return {
-        "symbol_line": f"New York {now.strftime('%H:%M:%S')}",
-        "account_html": account,
-        "board": board_line(now, ideas),
-        "charts": [
-            {key: nas[key] for key in ("id", "title", "bid", "ask", "bars", "levels", "note")},
-            {key: gold[key] for key in ("id", "title", "bid", "ask", "bars", "levels", "note")},
-        ],
+        "uk_clock": f"{uk.strftime('%a %H:%M:%S')} UK",
+        "ny_clock": f"{now.strftime('%H:%M:%S')} NY",
+        "metrics": metrics,
+        "board": board_summary(now, uk, ideas, nas_position),
+        "charts": [nas],
         "thinking": ideas,
-        "trades": trades,
+        "trades": [trade_row(p) for p in nas_positions],
         "journal": journal_lines(),
     }
 
@@ -1276,7 +1127,7 @@ def snapshot():
     global _snapshot_busy, _last_snapshot
     with _snapshot_lock:
         if _snapshot_busy:
-            return _last_snapshot or blank_snapshot("MetaTrader is waiting for the login")
+            return _last_snapshot or blank_snapshot("MetaTrader is refreshing...")
         _snapshot_busy = True
     box = {}
 
@@ -1294,7 +1145,7 @@ def snapshot():
     thread.start()
     thread.join(2.0)
     if thread.is_alive():
-        return _last_snapshot or blank_snapshot("MetaTrader is waiting for the login")
+        return _last_snapshot or blank_snapshot("MetaTrader is refreshing...")
     if box.get("error"):
         return blank_snapshot("MetaTrader is not connected")
     value = box.get("value") or blank_snapshot("MetaTrader is not connected")
@@ -1302,10 +1153,6 @@ def snapshot():
     if charts and charts[0].get("bars"):
         _last_snapshot = value
     return value
-
-
-def esc_text(value):
-    return (value or "").replace("&", "&amp;").replace("<", "&lt;")
 
 
 class Handler(BaseHTTPRequestHandler):
