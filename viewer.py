@@ -28,20 +28,20 @@ SPREAD_MAX = 250
 SHOT_POINTS = 60.0
 SHOT_STOP = 20.0
 SHOT_TARGET = 155.0
-SHOT_RISK = 1000.0
+SHOT_RISK = 1100.0
 FALLBACK_MIN = 10.0
 FALLBACK_STOP = 20.0
 FALLBACK_TARGET = 120.0
-FALLBACK_RISK = 600.0
+FALLBACK_RISK = 660.0
 PM_DRIVE_POINTS = 80.0
 PM_DRIVE_STOP = 20.0
 PM_DRIVE_TARGET = 100.0
-PM_DRIVE_RISK = 600.0
+PM_DRIVE_RISK = 660.0
 LONDON_MIN = 5.0
 LONDON_MAX = 30.0
 LONDON_STOP = 15.0
 LONDON_TARGET = 90.0
-LONDON_RISK = 600.0
+LONDON_RISK = 660.0
 RIDE_RISK = 400.0
 GOLD = "XAUUSD"
 GOLD_MIN = 1.20
@@ -477,12 +477,12 @@ def wanted_order(move, minutes, bars, bid, ask, shot_day, now=None):
         if shot_day and abs(move) >= SHOT_POINTS:
             side = "buy" if move > 0 else "sell"
             word = "Buy" if side == "buy" else "Sell"
-            return order_from(side, bid, ask, SHOT_STOP, SHOT_TARGET, SHOT_RISK, "ORB day"), f"{word} the 11:00 trend shot ($1,000)."
-        if FALLBACK_MIN <= abs(move) < SHOT_POINTS:
+            return order_from(side, bid, ask, SHOT_STOP, SHOT_TARGET, SHOT_RISK, "ORB day"), f"{word} the 11:00 trend shot ($1,100)."
+        if wd in (0, 1, 2) and FALLBACK_MIN <= abs(move) < SHOT_POINTS:
             side = "sell" if move > 0 else "buy"
             word = "Buy" if side == "buy" else "Sell"
-            return order_from(side, bid, ask, FALLBACK_STOP, FALLBACK_TARGET, FALLBACK_RISK, "ORB daily"), f"{word} the 11:00 range-fade. Stop 20, target 120, $600."
-        return None, "11:00 trade is waiting for at least a 10-point move from 09:30."
+            return order_from(side, bid, ask, FALLBACK_STOP, FALLBACK_TARGET, FALLBACK_RISK, "ORB daily"), f"{word} the 11:00 range-fade (Mon/Tue/Wed). Stop 20, target 120, $660."
+        return None, "11:00 trade is waiting for a 60-pt trend shot (or Mon/Tue/Wed 10..60 pt fade)."
     if wd in (2, 3, 4) and 13 * 60 <= minutes < 14 * 60 + 35:
         op13 = open_1300(bars)
         if op13 is not None:
@@ -775,7 +775,7 @@ def shots_idea(now, minutes, bid, bars, position, trading):
             "shots", "Nasdaq shots", "In a trade", side,
             f"{word} {float(position.volume):.2f} lots from {price_text(float(position.price_open))}.",
             facts,
-            ["Red line is the stop. Green line is the target. Full hold ($1,000 risk)."],
+            ["Red line is the stop. Green line is the target. 40% off at +1R & -0.60R cushion (+4R locks +1.5R, $1,100 risk)."],
         )
     if not shot_day(now):
         return idea(
@@ -865,14 +865,14 @@ def fallback_idea(now, minutes, bid, bars, position, trading):
             "fallback", "11:00 range-fade", "In a trade", side,
             f"{word} {float(position.volume):.2f} lots from {price_text(float(position.price_open))}.",
             facts,
-            ["Half-shot ($600 risk). Stop 20, target 120 (or 100 on 14:30 afternoon drive)."],
+            ["Half-shot ($660 risk). Stop 20, target 120 (or 100 on 14:30 afternoon drive)."],
         )
-    if now.weekday() >= 5:
+    if now.weekday() >= 5 or now.weekday() in (3, 4):
         return idea(
             "fallback", "11:00 range-fade", "Standing aside", "",
-            "The Nasdaq session is closed for the weekend.",
+            "The Nasdaq session is closed for the weekend." if now.weekday() >= 5 else "11:00 range-fade is Mon/Tue/Wed only (Thu/Fri reserved for 60+ pt shots).",
             [{"label": "Bid", "value": price_text(bid)}, {"label": "Band", "value": "10..60 pts"}, {"label": "Stop", "value": "20"}, {"label": "Target", "value": "120"}],
-            ["Fades a 10..60 point morning range back toward the 09:30 open at 11:00 NY ($600 risk)."],
+            ["Fades a 10..60 point morning range back toward the 09:30 open at 11:00 NY on Mon/Tue/Wed ($660 risk)."],
         )
     if role == "shots":
         return idea(
@@ -1046,7 +1046,7 @@ def gold_idea(now, minutes, trading, nasdaq_open, position, bid, ask, closed, na
         return idea(
             "gold", "08:30 UK London fade", "Standing aside", "",
             "London session is closed for the weekend.",
-            [{"label": "US100 Bid", "value": "—" if nas_bid is None else price_text(nas_bid)}, {"label": "Band", "value": "5..30 pts"}, {"label": "Stop / Target", "value": "15 / 90"}, {"label": "Risk", "value": "$600"}],
+            [{"label": "US100 Bid", "value": "—" if nas_bid is None else price_text(nas_bid)}, {"label": "Band", "value": "5..30 pts"}, {"label": "Stop / Target", "value": "15 / 90"}, {"label": "Risk", "value": "$660"}],
             ["Fades a 5..30 pt drift between 08:00 and 08:30 UK (03:00->03:30 NY) on US100.cash."],
         )
     if minutes >= 3 * 60 + 35:

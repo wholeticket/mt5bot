@@ -302,14 +302,21 @@ public:
         }
      }
 
-   // Scale out at a multiple of the original risk, then park the stop at the
-   // fill so the remainder can be held to the liquidity target without risking
-   // a second loss. There is no trail: the playbook's runner is the DOL.
+   // Two-stage smart runner management:
+   // Stage 1: At +partial_reward_risk * R (e.g. +1.0R), scale out partial_fraction (e.g. 40%)
+   //          and move the remaining runner's stop to entry + breakeven_offset_r * R
+   //          (e.g. -0.60R, which locks in positive net profit while giving the runner
+   //          12 pts NY / 9 pts London breathing room to survive normal entry retests).
+   // Stage 2: At +lock_trigger_r * R (e.g. +4.0R), move the runner's stop to
+   //          entry + lock_stop_r * R (e.g. +1.50R) to bank a multi-R win if price reverses.
    void Manage(const string symbol,
                const bool partial_enabled,
                const double partial_fraction,
                const double partial_reward_risk,
-               const bool move_to_breakeven)
+               const bool move_to_breakeven,
+               const double breakeven_offset_r=-0.60,
+               const double lock_trigger_r=4.0,
+               const double lock_stop_r=1.50)
      {
       MqlTick tick;
       if(!SymbolInfoTick(symbol,tick))
@@ -340,19 +347,27 @@ public:
          if(partial_enabled && partial_fraction>0.0 && scale_ready && !PartialAlreadyTaken(ticket))
             TakePartial(symbol,ticket,volume,partial_fraction);
 
-         if(!move_to_breakeven || !scale_ready || !PartialAlreadyTaken(ticket))
+         if(!move_to_breakeven)
             continue;
+
+         bool stage1_active=(scale_ready || PartialAlreadyTaken(ticket));
+         if(!stage1_active)
+            continue;
+
+         double desired_r=breakeven_offset_r;
+         if(lock_trigger_r>0.0 && advance>=lock_trigger_r*risk)
+            desired_r=MathMax(desired_r,lock_stop_r);
 
          if(type==POSITION_TYPE_BUY)
            {
-            double candidate=m_risk.NormalizePriceDown(symbol,open);
+            double candidate=m_risk.NormalizePriceDown(symbol,open+desired_r*risk);
             candidate=MathMin(candidate,tick.bid-minimum_distance-point);
             if(candidate>current_stop+tick_size/2.0 && candidate<tick.bid)
                ModifyStop(ticket,candidate,target);
            }
          else if(type==POSITION_TYPE_SELL)
            {
-            double candidate=m_risk.NormalizePriceUp(symbol,open);
+            double candidate=m_risk.NormalizePriceUp(symbol,open-desired_r*risk);
             candidate=MathMax(candidate,tick.ask+minimum_distance+point);
             if((current_stop<=0.0 || candidate<current_stop-tick_size/2.0) && candidate>tick.ask)
                ModifyStop(ticket,candidate,target);

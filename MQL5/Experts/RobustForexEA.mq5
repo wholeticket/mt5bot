@@ -1,6 +1,6 @@
 #property copyright "RobustForexEA"
-#property version   "6.22"
-#property description "NY-session Nasdaq EA, plus a gold scalp that steps aside for the shots."
+#property version   "6.30"
+#property description "NY & London Nasdaq EA with 2-stage smart runner management."
 
 #include <RobustForex/Strategy.mqh>
 #include <RobustForex/OpeningRange.mqh>
@@ -81,14 +81,17 @@ input bool InpBlockOpexDay=true;
 
 input group "Position Management"
 input bool   InpUsePartialTakeProfit=true;
-input double InpPartialFraction=0.50;
-input double InpPartialRewardRisk=1.0;
+input double InpPartialFraction=0.40;       // bank 40% at +1R, keep 60% runner
+input double InpPartialRewardRisk=1.0;      // trigger Stage 1 at +1.0R
 input bool   InpMoveStopToBreakeven=true;
+input double InpBreakevenOffsetR=-0.60;     // Stage 1 stop at -0.60R (locks +$44/+$26 net cash while giving 12pt/9pt cushion!)
+input double InpProfitLockTriggerR=4.0;     // Stage 2 trigger at +4.0R (+80 pts NY / +60 pts London)
+input double InpProfitLockStopR=1.50;       // Stage 2 stop at +1.50R (+30 pts NY / +22.5 pts London)
 input int    InpMaxBarsInTrade=0;
 
 input group "Risk Limits"
 input double InpRiskPercent=1.00;
-input double InpFixedRiskMoney=1000.00;       // above 0, each trade risks this many dollars ($1,000 shot / $600 half-shot)
+input double InpFixedRiskMoney=1100.00;       // above 0, each trade risks this many dollars ($1,100 shot / $660 half-shot)
 input double InpMinLotRiskCapPercent=0.00;
 input double InpMaxPortfolioRiskPercent=6.00;
 input int    InpMaxPortfolioPositions=1;
@@ -498,6 +501,7 @@ int OnInit(void)
    orb.day_move=InpDayShotPoints;
    orb.fade10_weekdays=8;      // Thursday only for 10:00 fade
    orb.daily_on=true;
+   orb.daily_weekdays=7;       // Mon/Tue/Wed only for 11:00 moderate fade
    orb.daily_minute=11*60;
    orb.daily_dir=-1;           // fade 10..60 pt range mornings at 11:00
    orb.daily_min_move=10.0;
@@ -523,7 +527,7 @@ int OnInit(void)
       orb.fixed_stop=20.0;
       orb.day_target=155.0;
       orb.daily_on=true;
-      g_tester_risk_money=1000.0;
+      g_tester_risk_money=1100.0;
       g_tester_target=orb.day_target;
      }
    else
@@ -542,9 +546,9 @@ int OnInit(void)
    PrintFormat("EA|event=initialized|bot=%s|symbol=%s|entry=%s|structure=%s|bias=%s|magic=%I64u",
                BotLabel(),_Symbol,EnumToString(InpEntryTimeframe),EnumToString(InpStructureTimeframe),
                EnumToString(InpBiasTimeframe),InpMagicNumber);
-   PrintFormat("EA|event=book|london=1|lon_stop=15|lon_target=90|daily=%d|daily_stop=%.0f|daily_target=%.0f|daily_risk=600|shots=%d|weekdays=%d|fade10=%d|stop=%.0f|target=%.0f|risk=%.0f|pm1430=1|partial50_1R=1",
-               (int)orb.daily_on,orb.daily_stop,orb.daily_target,(int)orb.day_shots,orb.weekdays,
-               orb.fade10_weekdays,orb.fixed_stop,orb.day_target,InpFixedRiskMoney);
+   PrintFormat("EA|event=book|london=1|lon_stop=15|lon_target=90|daily=%d|daily_days=%d|daily_stop=%.0f|daily_target=%.0f|daily_risk=660|shots=%d|weekdays=%d|fade10=%d|stop=%.0f|target=%.0f|risk=%.0f|pm1430=1|partial=%.2f|cushion=%.2f|lock4R=1.5R",
+               (int)orb.daily_on,orb.daily_weekdays,orb.daily_stop,orb.daily_target,(int)orb.day_shots,orb.weekdays,
+               orb.fade10_weekdays,orb.fixed_stop,orb.day_target,InpFixedRiskMoney,InpPartialFraction,InpBreakevenOffsetR);
    PrintFormat("EA|event=structure|enabled=%d|continuation=%d|inverse=%d",
                (int)InpTradeWithStructure,(int)InpAllowContinuation,(int)InpAllowInverse);
    ReplayOpeningRange();
@@ -972,12 +976,12 @@ void ShowBotLabel(void)
       structure+="\nGold joins only while the move is still going, and stands aside for the Nasdaq shots";
    if(InpDayShots && !InpOrbMorningFade)
      {
-      Comment(BotLabel()+"\n"+risk+" (50% off at +1R & stop to breakeven)\n"+
-              "All weekdays 08:30 UK (03:30 NY) fade a 5..30 point London move ($600, stop 15, target 90)\n"+
-              StringFormat("Thu 10:00 NY fade a %.0f-point move ($1,000, stop 20, target 155)",InpDayShotPoints)+"\n"+
-              StringFormat("Mon/Wed/Thu/Fri 11:00 NY go with a %.0f-point move ($1,000, stop 20, target 155)",InpDayShotPoints)+"\n"+
-              "All weekdays 11:00 NY fade a 10..60 point range move ($600, stop 20, target 120)\n"+
-              "Wed/Thu/Fri 14:30 NY go with an 80-point afternoon drive from 13:00 ($600, stop 20, target 100)\n"+
+      Comment(BotLabel()+"\n"+risk+" (40% @ +1R & -0.6R cushion, +4R locks +1.5R)\n"+
+              "All weekdays 08:30 UK (03:30 NY) fade a 5..30 point London move ($660, stop 15, target 90)\n"+
+              StringFormat("Thu 10:00 NY fade a %.0f-point move ($1,100, stop 20, target 155)",InpDayShotPoints)+"\n"+
+              StringFormat("Mon/Wed/Thu/Fri 11:00 NY go with a %.0f-point move ($1,100, stop 20, target 155)",InpDayShotPoints)+"\n"+
+              "Mon/Tue/Wed 11:00 NY fade a 10..60 point range move ($660, stop 20, target 120)\n"+
+              "Wed/Thu/Fri 14:30 NY go with an 80-point afternoon drive from 13:00 ($660, stop 20, target 100)\n"+
               days+structure);
       return;
      }
@@ -1181,7 +1185,8 @@ void OnTick(void)
    if(g_trades.HasManagedPosition(_Symbol))
       g_trades.Manage(_Symbol,
                       ((bool)MQLInfoInteger(MQL_TESTER) ? true : InpUsePartialTakeProfit),
-                      InpPartialFraction,InpPartialRewardRisk,InpMoveStopToBreakeven);
+                      InpPartialFraction,InpPartialRewardRisk,InpMoveStopToBreakeven,
+                      InpBreakevenOffsetR,InpProfitLockTriggerR,InpProfitLockStopR);
 
    MqlDateTime gold_clock;
    IctGmtToEastern(TimeGMT(),gold_clock);
@@ -1247,7 +1252,7 @@ void OnTick(void)
                         (orb.session=="am" ? "ORB am" :
                         (orb.session=="day" ? "ORB day" :
                         (orb.session=="daily" ? "ORB daily" : "ORB pm"))));
-         g_signal_risk=((orb.session=="daily" || orb.session=="london") ? 600.0 : 1000.0);
+         g_signal_risk=((orb.session=="daily" || orb.session=="london") ? 660.0 : 1100.0);
          shot_sent=SubmitSignal(orb.signal,orb.stop_price,orb.stop_distance,orb.target,orb.session,comment);
          g_signal_risk=0.0;
          if(shot_sent && orb.session=="daily" && eastern.hour*60+eastern.min<11*60)

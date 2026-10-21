@@ -31,6 +31,7 @@ struct OrbSettings
    double day_move;            // points from the 09:30 open
    double day_target;          // points from the signal close
    bool   daily_on;            // one trade a day, beside the shots
+   int    daily_weekdays;      // bits Mon=1 Tue=2 Wed=4 Thu=8 Fri=16 (7 = Mon/Tue/Wed)
    int    daily_minute;        // New York minute of that trade
    int    daily_dir;           // 1 goes with the morning move, -1 fades it
    double daily_min_move;
@@ -515,7 +516,7 @@ public:
    // One trade on the 11:00 bar when the morning stayed in a range (<60 pts)
    // rather than breaking out. Fading a 10..60 point morning drift back toward
    // the 09:30 open won in 8 of 10 months across 2026.
-   ENUM_ICT_SIGNAL DailyOnce(const MqlRates &bar,const int bar_min,
+   ENUM_ICT_SIGNAL DailyOnce(const MqlRates &bar,const int bar_min,const int dow,
                              double &stop_distance,double &target)
      {
       int open_min=9*60+30;
@@ -525,6 +526,9 @@ public:
          m_shot_seen=true;
         }
       if(!m_shot_seen || bar_min!=m_cfg.daily_minute)
+         return ICT_SIGNAL_NONE;
+      int daily_days=(m_cfg.daily_weekdays>0 ? m_cfg.daily_weekdays : 7);
+      if((daily_days&(1<<(dow-1)))==0)
          return ICT_SIGNAL_NONE;
       if(m_daily_done)
          return ICT_SIGNAL_NONE;
@@ -666,7 +670,7 @@ public:
            }
          if(m_cfg.daily_on)
            {
-            ENUM_ICT_SIGNAL daily=DailyOnce(bar,bar_min,out.stop_distance,out.target);
+            ENUM_ICT_SIGNAL daily=DailyOnce(bar,bar_min,dow,out.stop_distance,out.target);
             if(daily!=ICT_SIGNAL_NONE)
               {
                out.signal=daily;
