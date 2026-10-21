@@ -29,20 +29,20 @@ SPREAD_MAX = 250
 SHOT_POINTS = 60.0
 SHOT_STOP = 20.0
 SHOT_TARGET = 155.0
-SHOT_RISK = 1100.0
+SHOT_RISK = 880.0
 FALLBACK_MIN = 10.0
 FALLBACK_STOP = 20.0
 FALLBACK_TARGET = 120.0
-FALLBACK_RISK = 660.0
+FALLBACK_RISK = 528.0
 PM_DRIVE_POINTS = 80.0
 PM_DRIVE_STOP = 20.0
 PM_DRIVE_TARGET = 100.0
-PM_DRIVE_RISK = 660.0
+PM_DRIVE_RISK = 528.0
 LONDON_MIN = 5.0
 LONDON_MAX = 30.0
 LONDON_STOP = 15.0
 LONDON_TARGET = 90.0
-LONDON_RISK = 660.0
+LONDON_RISK = 528.0
 HOST = "0.0.0.0"
 PORTS = (8765, 18765)
 JOURNAL = Path(r"C:\Users\user\AppData\Roaming\MetaQuotes\Terminal\D0E8209F77C8CF37AD8BF550E51FF075\logs")
@@ -346,10 +346,10 @@ PAGE = """<!DOCTYPE html>
 
 <header>
   <div class="brand">
-    <span class="badge-bot">PASS BOT v6.31</span>
+    <span class="badge-bot">PASS BOT v6.40 · 1-STEP</span>
     <div>
-      <div class="symbol-tag">US100.cash (Nasdaq 100) · M5</div>
-      <div class="sub-tag">5-Rule Book · 2-Stage Smart Runner (40% @ +1R &amp; -0.60R Cushion · +4R Locks +1.5R) · US Holidays Banned</div>
+      <div class="symbol-tag">US100.cash (Nasdaq 100) · M5 · FTMO 1-Step $100k</div>
+      <div class="sub-tag">3% Daily Loss Lock ($2,400) · 10% EOD Trailing Floor · 50% Consistency Cap ($4,750/day) · US Holidays Banned</div>
     </div>
   </div>
   <div class="clocks">
@@ -363,7 +363,7 @@ PAGE = """<!DOCTYPE html>
 
 <div class="banner">
   <div class="banner-text" id="board">Connecting to MetaTrader 5...</div>
-  <div class="runner-pill">Shot Risk: <b>$1,100</b> (Full TP <b>+$5,555</b>) · Half-Shot Risk: <b>$660</b> (Full TP <b>+$2,640</b>) · <a href="/report.pdf" target="_blank" style="color:#58a6ff;font-weight:700;text-decoration:none">Download 2026 PDF Report</a> · <a href="/report" target="_blank" style="color:#3fb950;font-weight:700;text-decoration:none">Web Report</a></div>
+  <div class="runner-pill">Shot Risk: <b>$880</b> (Full TP <b>+$4,444</b> &lt; $5k 50% Rule) · Half-Shot: <b>$528</b> (Full TP <b>+$2,112</b>) · <a href="/report.pdf" target="_blank" style="color:#58a6ff;font-weight:700;text-decoration:none">2026 1-Step PDF</a> · <a href="/report" target="_blank" style="color:#3fb950;font-weight:700;text-decoration:none">Web Report</a></div>
 </div>
 
 <div class="section-head">
@@ -387,14 +387,14 @@ PAGE = """<!DOCTYPE html>
     </div>
 
     <div class="card">
-      <div class="card-head"><span>Weekly Schedule Overview (UK Time)</span></div>
+      <div class="card-head"><span>Weekly Schedule Overview (UK Time · FTMO 1-Step Sizing)</span></div>
       <table>
         <tr><th>Window (UK)</th><th>Setup</th><th>Active Days</th><th>Risk / Target</th></tr>
-        <tr><td><b>08:30 UK</b> (03:30 NY)</td><td>London Range-Fade (5..30 pts)</td><td>Mon Tue Wed Thu Fri</td><td>$660 · 15 SL / 90 TP</td></tr>
-        <tr><td><b>15:00 UK</b> (10:00 NY)</td><td>Thu 10am Snapback Fade (60+ pts)</td><td>Thursday only</td><td>$1,100 · 20 SL / 155 TP</td></tr>
-        <tr><td><b>16:00 UK</b> (11:00 NY)</td><td>11am Big Trend Shot (60+ pts)</td><td>Mon Wed Thu Fri</td><td>$1,100 · 20 SL / 155 TP</td></tr>
-        <tr><td><b>16:00 UK</b> (11:00 NY)</td><td>11am Mod Range-Fade (10..60 pts)</td><td>Mon Tue Wed</td><td>$660 · 20 SL / 120 TP</td></tr>
-        <tr><td><b>19:30 UK</b> (14:30 NY)</td><td>Afternoon Drive (80+ pts)</td><td>Wed Thu Fri</td><td>$660 · 20 SL / 100 TP</td></tr>
+        <tr><td><b>08:30 UK</b> (03:30 NY)</td><td>London Range-Fade (5..30 pts)</td><td>Mon Tue Wed Thu Fri</td><td>$528 · 15 SL / 90 TP</td></tr>
+        <tr><td><b>15:00 UK</b> (10:00 NY)</td><td>Thu 10am Snapback Fade (60+ pts)</td><td>Thursday only</td><td>$880 · 20 SL / 155 TP</td></tr>
+        <tr><td><b>16:00 UK</b> (11:00 NY)</td><td>11am Big Trend Shot (60+ pts)</td><td>Mon Wed Thu Fri</td><td>$880 · 20 SL / 155 TP</td></tr>
+        <tr><td><b>16:00 UK</b> (11:00 NY)</td><td>11am Mod Range-Fade (10..60 pts)</td><td>Mon Tue Wed</td><td>$528 · 20 SL / 120 TP</td></tr>
+        <tr><td><b>19:30 UK</b> (14:30 NY)</td><td>Afternoon Drive (80+ pts)</td><td>Wed Thu Fri</td><td>$528 · 20 SL / 100 TP</td></tr>
       </table>
     </div>
 
@@ -810,7 +810,7 @@ def trade_facts(position, bid):
 
 
 def london_card(now, minutes, bid, bars, position):
-    sub = "08:30 UK (03:30 NY) · Mon–Fri · $660 Risk"
+    sub = "08:30 UK (03:30 NY) · Mon–Fri · $528 Risk"
     op3 = open_at(bars, "03:00")
     mv = None if op3 is None else (bid - op3)
     mv_txt = "—" if mv is None else f"{mv:+.1f} pts"
@@ -824,7 +824,7 @@ def london_card(now, minutes, bid, bars, position):
         return idea("london", "1. London Range-Fade", sub, "Standing aside", "",
                     "Weekend — resumes Monday at 08:30 UK.",
                     [{"label": "Band", "value": "5..30 pts"}, {"label": "Stop / TP", "value": "15 / 90"},
-                     {"label": "Risk", "value": "$660"}, {"label": "Full TP", "value": "+$2,640"}],
+                     {"label": "Risk", "value": "$528"}, {"label": "Full TP", "value": "+$2,112"}],
                     ["Fades a 5..30 pt drift from 08:00 to 08:30 UK back toward the London open."])
     if minutes >= 3 * 60 + 35:
         return idea("london", "1. London Range-Fade", sub, "Passed", "",
@@ -848,11 +848,11 @@ def london_card(now, minutes, bid, bars, position):
                 [{"label": "Since 08:00 UK", "value": mv_txt}, {"label": "Fade Band", "value": "5..30 pts"},
                  {"label": "Stop / TP", "value": "15 / 90 pts"},
                  {"label": "08:30 UK in", "value": closes or clock_left(now, 3 * 60 + 30)}],
-                ["All 5 weekdays: fades a 5..30 pt London open drift ($660 risk, Full TP +$2,640)."])
+                ["All 5 weekdays: fades a 5..30 pt London open drift ($528 risk, Full TP +$2,112)."])
 
 
 def thu10_card(now, minutes, bid, bars, position):
-    sub = "15:00 UK (10:00 NY) · Thursday Only · $1,100 Risk"
+    sub = "15:00 UK (10:00 NY) · Thursday Only · $880 Risk"
     op930 = open_at(bars, "09:30")
     mv = None if op930 is None else (bid - op930)
     mv_txt = "—" if mv is None else f"{mv:+.1f} pts"
@@ -866,7 +866,7 @@ def thu10_card(now, minutes, bid, bars, position):
         return idea("thu10", "2. Thu 10am Snapback", sub, "Standing aside", "",
                     f"Today is {day_name(now)} — this setup only fires on Thursdays.",
                     [{"label": "Day", "value": "Thursday only"}, {"label": "Trigger", "value": "60+ pts"},
-                     {"label": "Stop / TP", "value": "20 / 155 pts"}, {"label": "Full TP", "value": "+$5,555"}],
+                     {"label": "Stop / TP", "value": "20 / 155 pts"}, {"label": "Full TP", "value": "+$4,444"}],
                     ["Fades an exhausted 60+ pt surge in the first 30 mins of NY on Thursdays."])
     if minutes >= 10 * 60 + 5:
         return idea("thu10", "2. Thu 10am Snapback", sub, "Passed", "",
@@ -888,11 +888,11 @@ def thu10_card(now, minutes, bid, bars, position):
                 [{"label": "Since 14:30 UK", "value": mv_txt}, {"label": "Needs", "value": "60+ pts"},
                  {"label": "Stop / TP", "value": "20 / 155 pts"},
                  {"label": "15:00 UK in", "value": closes or clock_left(now, 10 * 60)}],
-                ["Thursdays at 15:00 UK: fades a 60+ pt 30-minute spike ($1,100 risk, Full TP +$5,555)."])
+                ["Thursdays at 15:00 UK: fades a 60+ pt 30-minute spike ($880 risk, Full TP +$4,444)."])
 
 
 def shot11_card(now, minutes, bid, bars, position):
-    sub = "16:00 UK (11:00 NY) · Mon/Wed/Thu/Fri · $1,100 Risk"
+    sub = "16:00 UK (11:00 NY) · Mon/Wed/Thu/Fri · $880 Risk"
     op930 = open_at(bars, "09:30")
     mv = None if op930 is None else (bid - op930)
     mv_txt = "—" if mv is None else f"{mv:+.1f} pts"
@@ -901,12 +901,12 @@ def shot11_card(now, minutes, bid, bars, position):
         side, word, facts = trade_facts(position, bid)
         return idea("shot11", "3. 11am Big Trend Shot", sub, "In a trade", side,
                     f"{word} {float(position.volume):.2f} lots open.", facts,
-                    ["40% banked at +1R (-0.6R cushion), +4R locks +1.5R, target 155 pts (+$5,555)."])
+                    ["40% banked at +1R (-0.6R cushion), +4R locks +1.5R, target 155 pts (+$4,444)."])
     if not shot_day(now):
         return idea("shot11", "3. 11am Big Trend Shot", sub, "Standing aside", "",
                     f"Today is {day_name(now)} — Trend Shots run Mon, Wed, Thu, Fri.",
                     [{"label": "Days", "value": "Mon Wed Thu Fri"}, {"label": "Trigger", "value": "60+ pts"},
-                     {"label": "Stop / TP", "value": "20 / 155 pts"}, {"label": "Full TP", "value": "+$5,555"}],
+                     {"label": "Stop / TP", "value": "20 / 155 pts"}, {"label": "Full TP", "value": "+$4,444"}],
                     ["On Tuesday, 16:00 UK only trades the 10..60 pt Range-Fade."])
     if minutes >= 11 * 60 + 5:
         return idea("shot11", "3. 11am Big Trend Shot", sub, "Passed", "",
@@ -928,11 +928,11 @@ def shot11_card(now, minutes, bid, bars, position):
                 [{"label": "Since 14:30 UK", "value": mv_txt}, {"label": "Needs", "value": "60+ pts"},
                  {"label": "Stop / TP", "value": "20 / 155 pts"},
                  {"label": "16:00 UK in", "value": closes or clock_left(now, 11 * 60)}],
-                ["Mon/Wed/Thu/Fri at 16:00 UK: rides a 60+ pt breakout ($1,100 risk, Full TP +$5,555)."])
+                ["Mon/Wed/Thu/Fri at 16:00 UK: rides a 60+ pt breakout ($880 risk, Full TP +$4,444)."])
 
 
 def fade11_card(now, minutes, bid, bars, position):
-    sub = "16:00 UK (11:00 NY) · Mon/Tue/Wed · $660 Risk"
+    sub = "16:00 UK (11:00 NY) · Mon/Tue/Wed · $528 Risk"
     op930 = open_at(bars, "09:30")
     mv = None if op930 is None else (bid - op930)
     mv_txt = "—" if mv is None else f"{mv:+.1f} pts"
@@ -941,12 +941,12 @@ def fade11_card(now, minutes, bid, bars, position):
         side, word, facts = trade_facts(position, bid)
         return idea("fade11", "4. 11am Range-Fade", sub, "In a trade", side,
                     f"{word} {float(position.volume):.2f} lots open.", facts,
-                    ["Mon/Tue/Wed 10..60 pt range-fade. Stop 20 pts, target 120 pts (+$2,640)."])
+                    ["Mon/Tue/Wed 10..60 pt range-fade. Stop 20 pts, target 120 pts (+$2,112)."])
     if not mod_fade_day(now):
         return idea("fade11", "4. 11am Range-Fade", sub, "Standing aside", "",
                     f"Today is {day_name(now)} — 11am Range-Fade runs Mon/Tue/Wed only.",
                     [{"label": "Days", "value": "Mon Tue Wed"}, {"label": "Band", "value": "10..60 pts"},
-                     {"label": "Stop / TP", "value": "20 / 120 pts"}, {"label": "Full TP", "value": "+$2,640"}],
+                     {"label": "Stop / TP", "value": "20 / 120 pts"}, {"label": "Full TP", "value": "+$2,112"}],
                     ["Skipped on Thu/Fri because Thu/Fri mornings trend into the afternoon."])
     if minutes >= 11 * 60 + 5:
         return idea("fade11", "4. 11am Range-Fade", sub, "Passed", "",
@@ -968,11 +968,11 @@ def fade11_card(now, minutes, bid, bars, position):
                 [{"label": "Since 14:30 UK", "value": mv_txt}, {"label": "Fade Band", "value": "10..60 pts"},
                  {"label": "Stop / TP", "value": "20 / 120 pts"},
                  {"label": "16:00 UK in", "value": closes or clock_left(now, 11 * 60)}],
-                ["Mon/Tue/Wed at 16:00 UK: fades a 10..60 pt morning drift ($660 risk, Full TP +$2,640)."])
+                ["Mon/Tue/Wed at 16:00 UK: fades a 10..60 pt morning drift ($528 risk, Full TP +$2,112)."])
 
 
 def pm1430_card(now, minutes, bid, bars, position):
-    sub = "19:30 UK (14:30 NY) · Wed/Thu/Fri · $660 Risk"
+    sub = "19:30 UK (14:30 NY) · Wed/Thu/Fri · $528 Risk"
     op13 = open_at(bars, "13:00")
     mv = None if op13 is None else (bid - op13)
     mv_txt = "—" if mv is None else f"{mv:+.1f} pts"
@@ -981,12 +981,12 @@ def pm1430_card(now, minutes, bid, bars, position):
         side, word, facts = trade_facts(position, bid)
         return idea("pm1430", "5. 14:30 PM Drive", sub, "In a trade", side,
                     f"{word} {float(position.volume):.2f} lots open.", facts,
-                    ["Afternoon power-hour continuation. Stop 20 pts, target 100 pts (+$2,244)."])
+                    ["Afternoon power-hour continuation. Stop 20 pts, target 100 pts (+$1,795)."])
     if not pm_drive_day(now):
         return idea("pm1430", "5. 14:30 PM Drive", sub, "Standing aside", "",
                     f"Today is {day_name(now)} — Afternoon Drive runs Wed, Thu, Fri.",
                     [{"label": "Days", "value": "Wed Thu Fri"}, {"label": "Trigger", "value": "80+ pts"},
-                     {"label": "Stop / TP", "value": "20 / 100 pts"}, {"label": "Full TP", "value": "+$2,244"}],
+                     {"label": "Stop / TP", "value": "20 / 100 pts"}, {"label": "Full TP", "value": "+$1,795"}],
                     ["Rides strong 80+ pt afternoon trends from 18:00 UK into the 20:55 UK close."])
     if minutes >= 14 * 60 + 35:
         return idea("pm1430", "5. 14:30 PM Drive", sub, "Passed", "",
@@ -1008,7 +1008,7 @@ def pm1430_card(now, minutes, bid, bars, position):
                 [{"label": "Since 18:00 UK", "value": mv_txt}, {"label": "Needs", "value": "80+ pts"},
                  {"label": "Stop / TP", "value": "20 / 100 pts"},
                  {"label": "19:30 UK in", "value": closes or clock_left(now, 14 * 60 + 30)}],
-                ["Wed/Thu/Fri at 19:30 UK: rides an 80+ pt drive since 18:00 UK if flat ($660 risk)."])
+                ["Wed/Thu/Fri at 19:30 UK: rides an 80+ pt drive since 18:00 UK if flat ($528 risk)."])
 
 
 def board_summary(now, uk, ideas, position):
@@ -1098,12 +1098,12 @@ def snapshot_now():
     target_room = 110000.0 - equity
 
     metrics = [
-        {"label": "Account Balance", "value": f"${balance:,.2f}", "sub": info.name if info else "FTMO $100k", "cls": ""},
+        {"label": "Account Balance", "value": f"${balance:,.2f}", "sub": info.name if info else "FTMO 1-Step $100k", "cls": ""},
         {"label": "Live Equity", "value": f"${equity:,.2f}", "sub": f"Open P&L: ${open_pnl:+,.2f}", "cls": "good" if open_pnl >= 0 else "bad"},
-        {"label": "FTMO $90k Floor Cushion", "value": f"${floor_room:,.2f}", "sub": "Hard floor: $90,000 (Bot stops at $91k)", "cls": "good" if floor_room >= 5000 else "warn"},
-        {"label": "Daily Loss Limit", "value": "$4,200 Cap", "sub": "FTMO Max Daily Loss: $5,000", "cls": ""},
-        {"label": "2-Stage Smart Runner", "value": "40% @ +1R", "sub": "Stop -> -0.60R (+$44/$26 min) · +4R -> +1.5R", "cls": "good"},
-        {"label": "Execution Status", "value": "TRADING LIVE" if trading else "DISABLED", "sub": f"Magic {MAGIC} · US100.cash Only", "cls": "good" if trading else "bad"},
+        {"label": "10% EOD Trailing Cushion", "value": f"${floor_room:,.2f}", "sub": "Trails EOD balance by $10k (Bot stops at $9k)", "cls": "good" if floor_room >= 5000 else "warn"},
+        {"label": "3% Max Daily Loss Rule", "value": "$2,400 Lock", "sub": "FTMO 1-Step Daily Limit: -$3,000 (3%)", "cls": "good"},
+        {"label": "50% Consistency Cap", "value": "$4,750 / Day", "sub": "Best day must stay <= 50% of $10k target", "cls": "good"},
+        {"label": "Execution Status", "value": "TRADING LIVE" if trading else "DISABLED", "sub": f"Magic {MAGIC} · v6.40 1-Step Mode", "cls": "good" if trading else "bad"},
     ]
 
     return {

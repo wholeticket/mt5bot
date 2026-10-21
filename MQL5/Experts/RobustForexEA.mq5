@@ -1,6 +1,6 @@
 #property copyright "RobustForexEA"
-#property version   "6.31"
-#property description "NY & London Nasdaq EA with 2-stage smart runner + US Holiday Ban."
+#property version   "6.40"
+#property description "NY & London Nasdaq EA — FTMO 1-Step $100k Mode (3% Daily, 10% EOD Trailing, 50% Consistency, US Holiday Ban)."
 
 #include <RobustForex/Strategy.mqh>
 #include <RobustForex/OpeningRange.mqh>
@@ -91,17 +91,20 @@ input double InpProfitLockStopR=1.50;       // Stage 2 stop at +1.50R (+30 pts N
 input int    InpMaxBarsInTrade=0;
 
 input group "Risk Limits"
-input double InpRiskPercent=1.00;
-input double InpFixedRiskMoney=1100.00;       // above 0, each trade risks this many dollars ($1,100 shot / $660 half-shot)
+input double InpRiskPercent=0.88;
+input double InpFixedRiskMoney=880.00;         // FTMO 1-Step $100k: $880 Shot (Full TP +$4,444 < $5k consistency) / $528 Half-Shot (Full TP +$2,112)
 input double InpMinLotRiskCapPercent=0.00;
 input double InpMaxPortfolioRiskPercent=6.00;
 input int    InpMaxPortfolioPositions=1;
-input double InpMaxDailyLossPercent=4.50;
-input double InpMaxDailyLossMoney=4200.00;    // FTMO $100k daily loss buffer ($5,000 hard limit)
-input double InpEquityFloorMoney=91000.00;    // FTMO $100k static floor buffer ($90,000 hard limit)
+input double InpMaxDailyLossPercent=2.60;      // FTMO 1-Step 3.0% Max Daily Loss ($3,000 hard limit)
+input double InpMaxDailyLossMoney=2400.00;     // FTMO 1-Step $100k daily loss lock ($600 buffer above $3,000 limit)
+input double InpEquityFloorMoney=91000.00;     // FTMO $100k static floor buffer ($90,000 base floor)
+input double InpEodTrailingLossMoney=9000.00;  // FTMO 1-Step 10% EOD Trailing Max Loss buffer ($1,000 buffer above $10,000 EOD trailing limit)
+input double InpDailyProfitLockMoney=2500.00;  // FTMO 1-Step 50% Consistency: do not open a new trade once day profit >= $2,500
+input double InpDailyProfitCapMoney=4750.00;   // FTMO 1-Step 50% Consistency: auto-bank open trade if day profit reaches $4,750 (< $5,000)
 input double InpMaxEquityDrawdownPercent=40.00;
-input double InpMaxDrawdownMoney=0.00;        // above 0, halt after this dollar drop from the peak
-input bool   InpHaltOnDrawdown=false;         // stay stopped after the drawdown limit
+input double InpMaxDrawdownMoney=0.00;         // above 0, halt after this dollar drop from the peak
+input bool   InpHaltOnDrawdown=false;          // stay stopped after the drawdown limit
 input int    InpDrawdownCooldownDays=5;
 
 input group "Costs"
@@ -529,7 +532,7 @@ int OnInit(void)
       orb.fixed_stop=20.0;
       orb.day_target=155.0;
       orb.daily_on=true;
-      g_tester_risk_money=1100.0;
+      g_tester_risk_money=880.0;
       g_tester_target=orb.day_target;
      }
    else
@@ -548,9 +551,10 @@ int OnInit(void)
    PrintFormat("EA|event=initialized|bot=%s|symbol=%s|entry=%s|structure=%s|bias=%s|magic=%I64u",
                BotLabel(),_Symbol,EnumToString(InpEntryTimeframe),EnumToString(InpStructureTimeframe),
                EnumToString(InpBiasTimeframe),InpMagicNumber);
-   PrintFormat("EA|event=book|london=1|lon_stop=15|lon_target=90|daily=%d|daily_days=%d|daily_stop=%.0f|daily_target=%.0f|daily_risk=660|shots=%d|weekdays=%d|fade10=%d|stop=%.0f|target=%.0f|risk=%.0f|pm1430=1|partial=%.2f|cushion=%.2f|lock4R=1.5R|us_holiday_ban=%d",
+   PrintFormat("EA|event=book|mode=FTMO_1STEP_100K|london=1|lon_stop=15|lon_target=90|daily=%d|daily_days=%d|daily_stop=%.0f|daily_target=%.0f|daily_risk=528|shots=%d|weekdays=%d|fade10=%d|stop=%.0f|target=%.0f|risk=%.0f|pm1430=1|partial=%.2f|cushion=%.2f|lock4R=1.5R|us_holiday_ban=%d|daily_loss_lock=%.0f|eod_trail_lock=%.0f|consistency_cap=%.0f",
                (int)orb.daily_on,orb.daily_weekdays,orb.daily_stop,orb.daily_target,(int)orb.day_shots,orb.weekdays,
-               orb.fade10_weekdays,orb.fixed_stop,orb.day_target,InpFixedRiskMoney,InpPartialFraction,InpBreakevenOffsetR,(int)orb.skip_us_holidays);
+               orb.fade10_weekdays,orb.fixed_stop,orb.day_target,InpFixedRiskMoney,InpPartialFraction,InpBreakevenOffsetR,(int)orb.skip_us_holidays,
+               InpMaxDailyLossMoney,InpEodTrailingLossMoney,InpDailyProfitCapMoney);
    PrintFormat("EA|event=structure|enabled=%d|continuation=%d|inverse=%d",
                (int)InpTradeWithStructure,(int)InpAllowContinuation,(int)InpAllowInverse);
    ReplayOpeningRange();
@@ -978,12 +982,13 @@ void ShowBotLabel(void)
       structure+="\nGold joins only while the move is still going, and stands aside for the Nasdaq shots";
    if(InpDayShots && !InpOrbMorningFade)
      {
-      Comment(BotLabel()+"\n"+risk+" (40% @ +1R & -0.6R cushion, +4R locks +1.5R)\n"+
-              "All weekdays 08:30 UK (03:30 NY) fade a 5..30 point London move ($660, stop 15, target 90)\n"+
-              StringFormat("Thu 10:00 NY fade a %.0f-point move ($1,100, stop 20, target 155)",InpDayShotPoints)+"\n"+
-              StringFormat("Mon/Wed/Thu/Fri 11:00 NY go with a %.0f-point move ($1,100, stop 20, target 155)",InpDayShotPoints)+"\n"+
-              "Mon/Tue/Wed 11:00 NY fade a 10..60 point range move ($660, stop 20, target 120)\n"+
-              "Wed/Thu/Fri 14:30 NY go with an 80-point afternoon drive from 13:00 ($660, stop 20, target 100)\n"+
+      Comment(BotLabel()+" (FTMO 1-Step $100k)\n"+risk+" Shot / $528 Half-Shot (40% @ +1R & -0.6R cushion, +4R locks +1.5R)\n"+
+              "1-Step Guards: 3% Daily Loss Lock ($2,400) · 10% EOD Trailing Floor · 50% Consistency Cap ($4,750/day)\n"+
+              "All weekdays 08:30 UK (03:30 NY) fade a 5..30 point London move ($528, stop 15, target 90)\n"+
+              StringFormat("Thu 10:00 NY fade a %.0f-point move ($880, stop 20, target 155)",InpDayShotPoints)+"\n"+
+              StringFormat("Mon/Wed/Thu/Fri 11:00 NY go with a %.0f-point move ($880, stop 20, target 155)",InpDayShotPoints)+"\n"+
+              "Mon/Tue/Wed 11:00 NY fade a 10..60 point range move ($528, stop 20, target 120)\n"+
+              "Wed/Thu/Fri 14:30 NY go with an 80-point afternoon drive from 13:00 ($528, stop 20, target 100)\n"+
               "US Market Holidays: Banned (NYSE/Nasdaq holidays skipped)\n"+
               days+structure);
       return;
@@ -1017,8 +1022,8 @@ bool StructureMayEnter(const MqlDateTime &eastern)
    return true;
   }
 
-// Returns false when a full stop would reach the equity floor. The
-// dollar risk is cut so the stop lands on the floor, not through it.
+// Returns false when a full stop would reach the static or EOD trailing equity floor.
+// The dollar risk is cut so the stop lands on the floor, not through it.
 bool EntryRiskPercent(double &percent)
   {
    if(InpFixedRiskMoney<=0.0 && !(bool)MQLInfoInteger(MQL_TESTER))
@@ -1032,14 +1037,21 @@ bool EntryRiskPercent(double &percent)
       percent=InpRiskPercent;
       return true;
      }
-   double money=(InpFixedRiskMoney>0.0 ? InpFixedRiskMoney : 1000.0);
+   double money=(InpFixedRiskMoney>0.0 ? InpFixedRiskMoney : 880.0);
    if((bool)MQLInfoInteger(MQL_TESTER) && g_tester_risk_money>0.0)
       money=g_tester_risk_money;
    if(g_signal_risk>0.0)
       money=g_signal_risk;
-   if(InpEquityFloorMoney>0.0 && !(bool)MQLInfoInteger(MQL_TESTER))
+   double effective_floor=InpEquityFloorMoney;
+   if(InpEodTrailingLossMoney>0.0)
      {
-      double room=equity-InpEquityFloorMoney;
+      double eod_floor=g_risk.EodPeakBalance()-InpEodTrailingLossMoney;
+      if(eod_floor>effective_floor)
+         effective_floor=eod_floor;
+     }
+   if(effective_floor>0.0)
+     {
+      double room=equity-effective_floor;
       if(room<250.0)
          return false;
       if(room<money)
@@ -1145,9 +1157,10 @@ bool SubmitSignal(const ENUM_ICT_SIGNAL signal,const double stop_price,const dou
                       (tester ? 100.0 : InpMaxDailyLossPercent),
                       (tester ? 100.0 : InpMaxEquityDrawdownPercent),
                       InpDrawdownCooldownDays,risk_reason,
-                      (tester ? 0.0 : InpMaxDailyLossMoney),
+                      InpMaxDailyLossMoney,
                       (tester ? 0.0 : InpMaxDrawdownMoney),
-                      (tester ? false : InpHaltOnDrawdown)))
+                      (tester ? false : InpHaltOnDrawdown),
+                      InpDailyProfitLockMoney))
      {
       PrintFormat("RISK|event=entry_blocked|symbol=%s|reason=%s|planned_risk=%.2f",
                   _Symbol,risk_reason,planned_risk);
@@ -1186,10 +1199,25 @@ void OnTick(void)
    g_risk.RefreshAnchors();
 
    if(g_trades.HasManagedPosition(_Symbol))
+     {
+      // FTMO 1-Step 50% Consistency Guard: if today's total profit (realized + floating)
+      // reaches InpDailyProfitCapMoney ($4,750), bank the position immediately so no single
+      // day ever exceeds $5,000 (50% of the $10,000 target).
+      if(InpDailyProfitCapMoney>0.0)
+        {
+         double day_start=g_risk.DayStartEquity();
+         double equity=AccountInfoDouble(ACCOUNT_EQUITY);
+         if(day_start>0.0 && (equity-day_start)>=InpDailyProfitCapMoney)
+           {
+            g_trades.CloseManaged(_Symbol,"consistency_50pct_cap");
+            return;
+           }
+        }
       g_trades.Manage(_Symbol,
                       ((bool)MQLInfoInteger(MQL_TESTER) ? true : InpUsePartialTakeProfit),
                       InpPartialFraction,InpPartialRewardRisk,InpMoveStopToBreakeven,
                       InpBreakevenOffsetR,InpProfitLockTriggerR,InpProfitLockStopR);
+     }
 
    MqlDateTime gold_clock;
    IctGmtToEastern(TimeGMT(),gold_clock);
@@ -1255,7 +1283,8 @@ void OnTick(void)
                         (orb.session=="am" ? "ORB am" :
                         (orb.session=="day" ? "ORB day" :
                         (orb.session=="daily" ? "ORB daily" : "ORB pm"))));
-         g_signal_risk=((orb.session=="daily" || orb.session=="london") ? 660.0 : 1100.0);
+         double base_shot=(InpFixedRiskMoney>0.0 ? InpFixedRiskMoney : 880.0);
+         g_signal_risk=((orb.session=="daily" || orb.session=="london") ? MathRound(base_shot*0.60) : base_shot);
          shot_sent=SubmitSignal(orb.signal,orb.stop_price,orb.stop_distance,orb.target,orb.session,comment);
          g_signal_risk=0.0;
          if(shot_sent && orb.session=="daily" && eastern.hour*60+eastern.min<11*60)
