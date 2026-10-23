@@ -91,16 +91,16 @@ input double InpProfitLockStopR=1.50;       // Stage 2 stop at +1.50R (+30 pts N
 input int    InpMaxBarsInTrade=0;
 
 input group "Risk Limits"
-input double InpRiskPercent=0.88;
-input double InpFixedRiskMoney=880.00;         // FTMO 1-Step $100k: $880 Shot (Full TP +$4,444 < $5k consistency) / $528 Half-Shot (Full TP +$2,112)
+input double InpRiskPercent=1.10;
+input double InpFixedRiskMoney=1100.00;        // FTMO 1-Step $100k Sniper: $1,100 Shot (Full TP +$4,675 < $5k consistency!) / $660 Half-Shot (Full TP +$2,228)
 input double InpMinLotRiskCapPercent=0.00;
 input double InpMaxPortfolioRiskPercent=6.00;
 input int    InpMaxPortfolioPositions=1;
-input double InpMaxDailyLossPercent=2.60;      // FTMO 1-Step 3.0% Max Daily Loss ($3,000 hard limit)
-input double InpMaxDailyLossMoney=2400.00;     // FTMO 1-Step $100k daily loss lock ($600 buffer above $3,000 limit)
+input double InpMaxDailyLossPercent=2.40;      // FTMO 1-Step 3.0% Max Daily Loss ($3,000 hard limit)
+input double InpMaxDailyLossMoney=2000.00;     // FTMO 1-Step $100k daily loss lock: max 1 Shot + 1 Half-Shot loss (-$1,760 worst day, $1,240 buffer!)
 input double InpEquityFloorMoney=91000.00;     // FTMO $100k static floor buffer ($90,000 base floor)
 input double InpEodTrailingLossMoney=9000.00;  // FTMO 1-Step 10% EOD Trailing Max Loss buffer ($1,000 buffer above $10,000 EOD trailing limit)
-input double InpDailyProfitLockMoney=2500.00;  // FTMO 1-Step 50% Consistency: do not open a new trade once day profit >= $2,500
+input double InpDailyProfitLockMoney=600.00;   // 1 Big Win & Done for the Day: once day profit >= $600, stop opening new trades today!
 input double InpDailyProfitCapMoney=4750.00;   // FTMO 1-Step 50% Consistency: auto-bank open trade if day profit reaches $4,750 (< $5,000)
 input double InpMaxEquityDrawdownPercent=40.00;
 input double InpMaxDrawdownMoney=0.00;         // above 0, halt after this dollar drop from the peak
@@ -536,7 +536,7 @@ int OnInit(void)
       orb.fixed_stop=20.0;
       orb.day_target=155.0;
       orb.daily_on=true;
-      g_tester_risk_money=880.0;
+      g_tester_risk_money=1100.0;
       g_tester_target=orb.day_target;
      }
    else
@@ -986,13 +986,13 @@ void ShowBotLabel(void)
       structure+="\nGold joins only while the move is still going, and stands aside for the Nasdaq shots";
    if(InpDayShots && !InpOrbMorningFade)
      {
-      Comment(BotLabel()+" v6.50 (FTMO 1-Step $100k · High-Win-Rate Mode)\n"+risk+" Shot / $528 Half-Shot (50% @ +0.75R & -0.70R cushion, +4R locks +1.5R)\n"+
-              "1-Step Guards: 3% Daily Loss Lock ($2,400) · 10% EOD Trailing Floor · 50% Consistency Cap ($4,750/day)\n"+
-              "All weekdays 08:30 UK (03:30 NY) fade a 5..30 point London move ($528, stop 15, target 90)\n"+
-              StringFormat("Thu 10:00 NY fade a %.0f-point move ($880, stop 20, target 155)",InpDayShotPoints)+"\n"+
-              StringFormat("Mon/Wed/Thu/Fri 11:00 NY go with a %.0f-point move ($880, stop 20, target 155, 10m burst <= 55)",InpDayShotPoints)+"\n"+
-              "Mon/Tue/Wed 11:00 NY fade a 10..60 point range move ($528, stop 20, target 120)\n"+
-              "Wed/Thu/Fri 14:30 NY go with an 80-point afternoon drive from 13:00 ($528, stop 20, target 100, 10m burst <= 50)\n"+
+      Comment(BotLabel()+" v6.50 (FTMO 1-Step $100k · 1-Big-Win-a-Day Sniper)\n"+risk+" Shot / $660 Half-Shot (50% @ +0.75R & -0.70R cushion, +4R locks +1.5R)\n"+
+              "1-Step Guards: 1 Big Win ($600+) & Done · 3% Daily Loss Lock ($2,000) · 10% EOD Trailing · 50% Consistency ($4,750)\n"+
+              "All weekdays 08:30 UK (03:30 NY) fade a 5..30 point London move ($660, stop 15, target 90)\n"+
+              StringFormat("Thu 10:00 NY fade a %.0f-point move ($1,100, stop 20, target 155)",InpDayShotPoints)+"\n"+
+              StringFormat("Mon/Wed/Thu/Fri 11:00 NY go with a %.0f-point move ($1,100, stop 20, target 155, 10m burst <= 55)",InpDayShotPoints)+"\n"+
+              "Mon/Tue/Wed 11:00 NY fade a 10..60 point range move ($660, stop 20, target 120)\n"+
+              "Wed/Thu/Fri 14:30 NY go with an 80-point afternoon drive from 13:00 ($660, stop 20, target 100, 10m burst <= 50)\n"+
               "US Market Holidays: Banned (NYSE/Nasdaq holidays skipped)\n"+
               days+structure);
       return;
