@@ -555,10 +555,9 @@ int OnInit(void)
    PrintFormat("EA|event=initialized|bot=%s|symbol=%s|entry=%s|structure=%s|bias=%s|magic=%I64u",
                BotLabel(),_Symbol,EnumToString(InpEntryTimeframe),EnumToString(InpStructureTimeframe),
                EnumToString(InpBiasTimeframe),InpMagicNumber);
-   PrintFormat("EA|event=book|mode=FTMO_1STEP_100K|london=1|lon_stop=15|lon_target=90|daily=%d|daily_days=%d|daily_stop=%.0f|daily_target=%.0f|daily_risk=528|shots=%d|weekdays=%d|fade10=%d|stop=%.0f|target=%.0f|risk=%.0f|pm1430=1|partial=%.2f|cushion=%.2f|lock4R=1.5R|us_holiday_ban=%d|daily_loss_lock=%.0f|eod_trail_lock=%.0f|consistency_cap=%.0f",
+   PrintFormat("EA|event=book|mode=FTMO_1STEP_100K_SNIPER_V650|london=1|lon_stop=15|lon_target=90|daily=%d|daily_days=%d|daily_stop=%.0f|daily_target=%.0f|daily_risk=660|shots=%d|weekdays=%d|fade10=%d|stop=%.0f|target=%.0f|risk=1100|pm1430=1|partial=0.50|trig=0.75R|cushion=-0.70|lock4R=1.5R|us_holiday_ban=%d|daily_loss_lock=2000|daily_win_lock=600|eod_trail_lock=9000|consistency_cap=4750",
                (int)orb.daily_on,orb.daily_weekdays,orb.daily_stop,orb.daily_target,(int)orb.day_shots,orb.weekdays,
-               orb.fade10_weekdays,orb.fixed_stop,orb.day_target,InpFixedRiskMoney,InpPartialFraction,InpBreakevenOffsetR,(int)orb.skip_us_holidays,
-               InpMaxDailyLossMoney,InpEodTrailingLossMoney,InpDailyProfitCapMoney);
+               orb.fade10_weekdays,orb.fixed_stop,orb.day_target,(int)orb.skip_us_holidays);
    PrintFormat("EA|event=structure|enabled=%d|continuation=%d|inverse=%d",
                (int)InpTradeWithStructure,(int)InpAllowContinuation,(int)InpAllowInverse);
    ReplayOpeningRange();
@@ -1041,9 +1040,7 @@ bool EntryRiskPercent(double &percent)
       percent=InpRiskPercent;
       return true;
      }
-   double money=(InpFixedRiskMoney>0.0 ? InpFixedRiskMoney : 880.0);
-   if((bool)MQLInfoInteger(MQL_TESTER) && g_tester_risk_money>0.0)
-      money=g_tester_risk_money;
+   double money=1100.0;
    if(g_signal_risk>0.0)
       money=g_signal_risk;
    double effective_floor=InpEquityFloorMoney;
@@ -1161,10 +1158,10 @@ bool SubmitSignal(const ENUM_ICT_SIGNAL signal,const double stop_price,const dou
                       (tester ? 100.0 : InpMaxDailyLossPercent),
                       (tester ? 100.0 : InpMaxEquityDrawdownPercent),
                       InpDrawdownCooldownDays,risk_reason,
-                      InpMaxDailyLossMoney,
+                      2000.0,
                       (tester ? 0.0 : InpMaxDrawdownMoney),
                       (tester ? false : InpHaltOnDrawdown),
-                      InpDailyProfitLockMoney))
+                      600.0))
      {
       PrintFormat("RISK|event=entry_blocked|symbol=%s|reason=%s|planned_risk=%.2f",
                   _Symbol,risk_reason,planned_risk);
@@ -1218,9 +1215,9 @@ void OnTick(void)
            }
         }
       g_trades.Manage(_Symbol,
-                      ((bool)MQLInfoInteger(MQL_TESTER) ? true : InpUsePartialTakeProfit),
-                      InpPartialFraction,InpPartialRewardRisk,InpMoveStopToBreakeven,
-                      InpBreakevenOffsetR,InpProfitLockTriggerR,InpProfitLockStopR);
+                      true,
+                      0.50,0.75,true,
+                      -0.70,4.0,1.50);
      }
 
    MqlDateTime gold_clock;
@@ -1287,8 +1284,8 @@ void OnTick(void)
                         (orb.session=="am" ? "ORB am" :
                         (orb.session=="day" ? "ORB day" :
                         (orb.session=="daily" ? "ORB daily" : "ORB pm"))));
-         double base_shot=(InpFixedRiskMoney>0.0 ? InpFixedRiskMoney : 880.0);
-         g_signal_risk=((orb.session=="daily" || orb.session=="london") ? MathRound(base_shot*0.60) : base_shot);
+         double base_shot=1100.0;
+         g_signal_risk=((orb.session=="daily" || orb.session=="london") ? 660.0 : base_shot);
          shot_sent=SubmitSignal(orb.signal,orb.stop_price,orb.stop_distance,orb.target,orb.session,comment);
          g_signal_risk=0.0;
          if(shot_sent && orb.session=="daily" && eastern.hour*60+eastern.min<11*60)
