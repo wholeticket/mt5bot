@@ -346,10 +346,10 @@ PAGE = """<!DOCTYPE html>
 
 <header>
   <div class="brand">
-    <span class="badge-bot">PASS BOT v6.40 · 1-STEP</span>
+    <span class="badge-bot">PASS BOT v6.50 · 69.5% WR</span>
     <div>
       <div class="symbol-tag">US100.cash (Nasdaq 100) · M5 · FTMO 1-Step $100k</div>
-      <div class="sub-tag">3% Daily Loss Lock ($2,400) · 10% EOD Trailing Floor · 50% Consistency Cap ($4,750/day) · US Holidays Banned</div>
+      <div class="sub-tag">50% Fast Bank @ +0.75R (+15pt NY / +11.25pt Lon) &amp; -0.70R Cushion · 10m Burst Exhaustion Guard · US Holidays Banned</div>
     </div>
   </div>
   <div class="clocks">
@@ -1103,7 +1103,7 @@ def snapshot_now():
         {"label": "10% EOD Trailing Cushion", "value": f"${floor_room:,.2f}", "sub": "Trails EOD balance by $10k (Bot stops at $9k)", "cls": "good" if floor_room >= 5000 else "warn"},
         {"label": "3% Max Daily Loss Rule", "value": "$2,400 Lock", "sub": "FTMO 1-Step Daily Limit: -$3,000 (3%)", "cls": "good"},
         {"label": "50% Consistency Cap", "value": "$4,750 / Day", "sub": "Best day must stay <= 50% of $10k target", "cls": "good"},
-        {"label": "Execution Status", "value": "TRADING LIVE" if trading else "DISABLED", "sub": f"Magic {MAGIC} · v6.40 1-Step Mode", "cls": "good" if trading else "bad"},
+        {"label": "Execution Status", "value": "TRADING LIVE" if trading else "DISABLED", "sub": f"Magic {MAGIC} · v6.50 High-WR Mode", "cls": "good" if trading else "bad"},
     ]
 
     return {

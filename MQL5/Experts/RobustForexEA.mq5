@@ -1,6 +1,6 @@
 #property copyright "RobustForexEA"
-#property version   "6.40"
-#property description "NY & London Nasdaq EA — FTMO 1-Step $100k Mode (3% Daily, 10% EOD Trailing, 50% Consistency, US Holiday Ban)."
+#property version   "6.50"
+#property description "NY & London Nasdaq EA — FTMO 1-Step $100k High-Win-Rate Mode (+0.75R Fast Bank, 10m Burst Guard, US Holiday Ban)."
 
 #include <RobustForex/Strategy.mqh>
 #include <RobustForex/OpeningRange.mqh>
@@ -82,10 +82,10 @@ input bool InpBlockUsHolidays=true; // skip US NYSE/Nasdaq bank holidays
 
 input group "Position Management"
 input bool   InpUsePartialTakeProfit=true;
-input double InpPartialFraction=0.40;       // bank 40% at +1R, keep 60% runner
-input double InpPartialRewardRisk=1.0;      // trigger Stage 1 at +1.0R
+input double InpPartialFraction=0.50;       // bank 50% at +0.75R (+15pt NY / +11.25pt London), keep 50% runner
+input double InpPartialRewardRisk=0.75;     // trigger Stage 1 at +0.75R (+15 pts NY / +11.25 pts London)
 input bool   InpMoveStopToBreakeven=true;
-input double InpBreakevenOffsetR=-0.60;     // Stage 1 stop at -0.60R (locks +$44/+$26 net cash while giving 12pt/9pt cushion!)
+input double InpBreakevenOffsetR=-0.70;     // Stage 1 stop at -0.70R (locks +$22/+$13 net cash while giving 14pt/10.5pt cushion!)
 input double InpProfitLockTriggerR=4.0;     // Stage 2 trigger at +4.0R (+80 pts NY / +60 pts London)
 input double InpProfitLockStopR=1.50;       // Stage 2 stop at +1.50R (+30 pts NY / +22.5 pts London)
 input int    InpMaxBarsInTrade=0;
@@ -523,6 +523,10 @@ int OnInit(void)
    orb.london_stop=15.0;
    orb.london_target=90.0;
    orb.skip_us_holidays=InpBlockUsHolidays;
+   orb.london_max_burst10=22.0; // skip London fade if last 10m spiked > 22 pts
+   orb.fade10_max_burst10=65.0; // skip Thu 10am fade if last 10m spiked > 65 pts
+   orb.shot11_max_burst10=55.0; // skip 11am trend shot if last 10m already exhausted > 55 pts
+   orb.pm_max_burst10=50.0;     // skip 14:30 PM drive if last 10m already dumped/spiked > 50 pts
    if((bool)MQLInfoInteger(MQL_TESTER))
      {
       // 10:00 fade on Thursday (8); 11:00 trend shot on Mon/Wed/Thu/Fri (29).
@@ -982,13 +986,13 @@ void ShowBotLabel(void)
       structure+="\nGold joins only while the move is still going, and stands aside for the Nasdaq shots";
    if(InpDayShots && !InpOrbMorningFade)
      {
-      Comment(BotLabel()+" (FTMO 1-Step $100k)\n"+risk+" Shot / $528 Half-Shot (40% @ +1R & -0.6R cushion, +4R locks +1.5R)\n"+
+      Comment(BotLabel()+" v6.50 (FTMO 1-Step $100k · High-Win-Rate Mode)\n"+risk+" Shot / $528 Half-Shot (50% @ +0.75R & -0.70R cushion, +4R locks +1.5R)\n"+
               "1-Step Guards: 3% Daily Loss Lock ($2,400) · 10% EOD Trailing Floor · 50% Consistency Cap ($4,750/day)\n"+
               "All weekdays 08:30 UK (03:30 NY) fade a 5..30 point London move ($528, stop 15, target 90)\n"+
               StringFormat("Thu 10:00 NY fade a %.0f-point move ($880, stop 20, target 155)",InpDayShotPoints)+"\n"+
-              StringFormat("Mon/Wed/Thu/Fri 11:00 NY go with a %.0f-point move ($880, stop 20, target 155)",InpDayShotPoints)+"\n"+
+              StringFormat("Mon/Wed/Thu/Fri 11:00 NY go with a %.0f-point move ($880, stop 20, target 155, 10m burst <= 55)",InpDayShotPoints)+"\n"+
               "Mon/Tue/Wed 11:00 NY fade a 10..60 point range move ($528, stop 20, target 120)\n"+
-              "Wed/Thu/Fri 14:30 NY go with an 80-point afternoon drive from 13:00 ($528, stop 20, target 100)\n"+
+              "Wed/Thu/Fri 14:30 NY go with an 80-point afternoon drive from 13:00 ($528, stop 20, target 100, 10m burst <= 50)\n"+
               "US Market Holidays: Banned (NYSE/Nasdaq holidays skipped)\n"+
               days+structure);
       return;

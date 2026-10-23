@@ -49,6 +49,10 @@ struct OrbSettings
    double london_stop;         // 15.0 points stop
    double london_target;       // 90.0 points target (6R)
    bool   skip_us_holidays;    // skip US NYSE/Nasdaq bank holidays
+   double london_max_burst10;  // max 10-min burst into 03:30 NY (22 pts)
+   double fade10_max_burst10;  // max 10-min burst into 10:00 NY (65 pts)
+   double shot11_max_burst10;  // max 10-min burst into 11:00 NY (55 pts)
+   double pm_max_burst10;      // max 10-min burst into 14:30 NY (50 pts)
   };
 
 struct OrbSignal
@@ -95,10 +99,14 @@ private:
    double      m_drive_low;
    bool        m_drive_seen;
    bool        m_replay;
+   double      m_prev_bar_open;
+   int         m_prev_bar_min;
 
    void ResetDay(const int day)
      {
       m_day=day;
+      m_prev_bar_open=0.0;
+      m_prev_bar_min=-1;
       m_am_high=0.0;
       m_am_low=0.0;
       m_am_open=0.0;
@@ -277,6 +285,11 @@ public:
       if(dow<1 || dow>5)
          return;
       int bar_min=eastern.hour*60+eastern.min;
+      if(bar_min==3*60+25 || bar_min==9*60+55 || bar_min==10*60+55 || bar_min==14*60+25)
+        {
+         m_prev_bar_open=bar.open;
+         m_prev_bar_min=bar_min;
+        }
       if(bar_min==3*60)
         {
          m_london_open=bar.open;
@@ -319,6 +332,8 @@ public:
       m_london_open=0.0;
       m_london_seen=false;
       m_london_done=false;
+      m_prev_bar_open=0.0;
+      m_prev_bar_min=-1;
      }
 
    void Configure(const OrbSettings &settings)
@@ -409,6 +424,12 @@ public:
       double move=bar.close-m_london_open;
       if(MathAbs(move)<m_cfg.london_min_move || MathAbs(move)>=m_cfg.london_max_move)
          return ICT_SIGNAL_NONE;
+      if(m_cfg.london_max_burst10>0.0 && m_prev_bar_min==3*60+25 && m_prev_bar_open>0.0)
+        {
+         double burst10=(bar.close-m_prev_bar_open)*(move>0.0 ? 1.0 : -1.0);
+         if(burst10>m_cfg.london_max_burst10)
+            return ICT_SIGNAL_NONE;
+        }
 
       bool buy=(move<0.0);
       stop_distance=m_cfg.london_stop;
@@ -457,6 +478,18 @@ public:
       double move=bar.close-m_shot_open;
       if(MathAbs(move)<m_cfg.day_move)
          return ICT_SIGNAL_NONE;
+      if(fade_bar && m_cfg.fade10_max_burst10>0.0 && m_prev_bar_min==9*60+55 && m_prev_bar_open>0.0)
+        {
+         double burst10=(bar.close-m_prev_bar_open)*(move>0.0 ? 1.0 : -1.0);
+         if(burst10>m_cfg.fade10_max_burst10)
+            return ICT_SIGNAL_NONE;
+        }
+      if(with_bar && m_cfg.shot11_max_burst10>0.0 && m_prev_bar_min==10*60+55 && m_prev_bar_open>0.0)
+        {
+         double burst10=(bar.close-m_prev_bar_open)*(move>0.0 ? 1.0 : -1.0);
+         if(burst10>m_cfg.shot11_max_burst10)
+            return ICT_SIGNAL_NONE;
+        }
 
       bool buy=(fade_bar ? move<0.0 : move>0.0);
       stop_distance=m_cfg.fixed_stop;
@@ -574,6 +607,12 @@ public:
       double move=bar.close-m_pm_drive_open;
       if(MathAbs(move)<m_cfg.pm_drive_move)
          return ICT_SIGNAL_NONE;
+      if(m_cfg.pm_max_burst10>0.0 && m_prev_bar_min==14*60+25 && m_prev_bar_open>0.0)
+        {
+         double burst10=(bar.close-m_prev_bar_open)*(move>0.0 ? 1.0 : -1.0);
+         if(burst10>m_cfg.pm_max_burst10)
+            return ICT_SIGNAL_NONE;
+        }
 
       bool buy=(move>0.0);
       stop_distance=m_cfg.pm_drive_stop;
@@ -642,6 +681,11 @@ public:
          shot_day=((m_cfg.weekdays&(1<<(dow-1)))!=0);
 
       int bar_min=eastern.hour*60+eastern.min;
+      if(bar_min==3*60+25 || bar_min==9*60+55 || bar_min==10*60+55 || bar_min==14*60+25)
+        {
+         m_prev_bar_open=bar.open;
+         m_prev_bar_min=bar_min;
+        }
       if(m_cfg.style==2)
         {
          if(m_cfg.london_on)
