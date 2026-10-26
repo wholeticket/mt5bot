@@ -14,10 +14,10 @@ enum ENUM_PLAYBOOK
   };
 
 input group "Model"
-input ENUM_PLAYBOOK   InpPlaybook=PLAYBOOK_OPENING_RANGE;
-input bool            InpTradeWithStructure=false; // off: 5-rule Nasdaq book only
-input bool            InpAllowContinuation=true;
-input bool            InpAllowInverse=true;
+input ENUM_PLAYBOOK   InpPlaybook=PLAYBOOK_OPENING_RANGE; // 5-rule book: keep opening range
+input bool            InpTradeWithStructure=false; // legacy ICT, ignored by the 5-rule book
+input bool            InpAllowContinuation=true;   // legacy ICT, ignored by the 5-rule book
+input bool            InpAllowInverse=true;        // legacy ICT, ignored by the 5-rule book
 input ENUM_TIMEFRAMES InpEntryTimeframe=PERIOD_M5;
 input ENUM_TIMEFRAMES InpStructureTimeframe=PERIOD_M15;
 input ENUM_TIMEFRAMES InpBiasTimeframe=PERIOD_M30;
@@ -28,7 +28,7 @@ input int             InpFvgLookbackMinutes=480;
 input int             InpMssValidMinutes=90;
 input double          InpMinSwingStepPoints=20.0;
 
-input group "Setup Quality"
+input group "Legacy ICT setup (ignored by the 5-rule book)"
 input double InpMinImbalancePoints=15.0;   // middle candle of the three-candle gap
 input double InpMinBodyFraction=0.55;      // gap candle and the entry candle
 input double InpMinMssBodyFraction=0.50;   // structure-break candle
@@ -39,7 +39,7 @@ input double InpStopPoints=40.0;           // inverse model only; continuation u
 input int    InpChopBars=8;
 input double InpMaxAlternation=0.80;
 
-input group "Opening Range"
+input group "Legacy opening-range knobs (ignored by the 5-rule book)"
 input int    InpOrbRangeMinutes=30;
 input double InpOrbMinRangePoints=12.0;
 input double InpOrbMaxRangePoints=80.0;
@@ -47,16 +47,16 @@ input double InpOrbRewardRisk=1.5;
 input bool   InpOrbRequireDrive=true;
 input int    InpOrbStyle=2;             // 0 range break, 1 with the drive, 2 fade the drive
 input double InpOrbMinDrivePoints=5.0;
-input double InpOrbFixedStopPoints=20.0;
+input double InpOrbFixedStopPoints=20.0; // 5-rule book: 20-point stop on the $1,100 shot
 input bool   InpOrbShortsOnly=true;
 input bool   InpOrbMorningOnly=true;
 input int    InpOrbMaxMorningEntries=1; // 0 keeps two shorts, or three on a large drive
 input bool   InpOrbRequireOpenFail=true; // pass account only: skip a short until the open has failed
-input int    InpOrbWeekdays=29;          // bits Mon=1 Tue=2 Wed=4 Thu=8 Fri=16 (29 = Mon/Wed/Thu/Fri)
-input bool   InpOrbMorningFade=false;    // the original short after a failed open
-input bool   InpDayShots=true;           // 10:00 New York fade, 11:00 New York continuation
-input double InpDayShotPoints=60.0;      // move from the 09:30 open
-input double InpDayShotTarget=155.0;     // points beyond the signal close
+input int    InpOrbWeekdays=29;          // 5-rule book: Mon/Wed/Thu/Fri 11:00 trend (bits Mon=1 ... Fri=16)
+input bool   InpOrbMorningFade=false;    // legacy failed-open short, ignored by the 5-rule book
+input bool   InpDayShots=true;           // 5-rule book: Thu 14:00 London fade and 15:00 London check
+input double InpDayShotPoints=60.0;      // 5-rule book: 60 points from the 13:30 London (09:30 NY) open
+input double InpDayShotTarget=155.0;     // 5-rule book: 155-point target on the $1,100 shot
 
 input group "New York Session"
 input bool InpTradeNyAm=true;
@@ -116,13 +116,13 @@ input ulong InpMagicNumber=26101201;
 input int   InpMaximumSpreadPoints=250; // broker points (250 = 2.50 index points on US100.cash)
 input int   InpDeviationPoints=20;
 
-input group "Ride"
-input bool   InpRideMoves=false;     // after 11:00 hop is off; empty days use the 11:00 trade
+input group "Legacy ride (off, ignored by the 5-rule book)"
+input bool   InpRideMoves=false;     // legacy hop, off: empty days use the 15:00 London check
 input double InpRideMinMove=12.0;    // points the last half hour already traveled
 input double InpRideRiskMoney=400.0; // dollars at risk on a hop; shots keep their own risk
 
-input group "Gold"
-input bool   InpGoldMoves=false;         // gold scalping disabled after 2026 study
+input group "Legacy gold (off, ignored by the 5-rule book)"
+input bool   InpGoldMoves=false;         // legacy gold scalp, off
 input string InpGoldSymbol="XAUUSD";     // FTMO gold spot
 input double InpGoldMinMove=1.20;        // dollars in the last 3 minutes
 input double InpGoldRiskMoney=250.0;     // dollars at risk; Nasdaq shots keep their own risk
@@ -502,7 +502,7 @@ int OnInit(void)
    orb.morning_only=InpOrbMorningOnly;
    orb.max_morning_entries=InpOrbMaxMorningEntries;
    orb.require_open_fail=InpOrbRequireOpenFail;
-   orb.day_move=InpDayShotPoints;
+   orb.day_move=60.0;          // 60 points from the 13:30 London open
    orb.fade10_weekdays=8;      // Thursday only for 10:00 fade
    orb.daily_on=true;
    orb.daily_weekdays=7;       // Mon/Tue/Wed only for 11:00 moderate fade
@@ -517,7 +517,7 @@ int OnInit(void)
    orb.pm_drive_move=80.0;
    orb.pm_drive_stop=20.0;
    orb.pm_drive_target=100.0;
-   orb.london_on=true;         // 03:30 NY (08:30 UK) London Open range-fade (5..30 pts)
+   orb.london_on=true;         // 03:30 NY = 07:30 London fade (5..30 pts, $660)
    orb.london_min_move=5.0;
    orb.london_max_move=30.0;
    orb.london_stop=15.0;
@@ -527,31 +527,21 @@ int OnInit(void)
    orb.fade10_max_burst10=65.0; // skip Thu 10am fade if last 10m spiked > 65 pts
    orb.shot11_max_burst10=55.0; // skip 11am trend shot if last 10m already exhausted > 55 pts
    orb.pm_max_burst10=50.0;     // skip 14:30 PM drive if last 10m already dumped/spiked > 50 pts
-   if((bool)MQLInfoInteger(MQL_TESTER))
-     {
-      // 10:00 fade on Thursday (8); 11:00 trend shot on Mon/Wed/Thu/Fri (29).
-      orb.weekdays=29;
-      orb.morning_fade=false;
-      orb.day_shots=true;
-      orb.fixed_stop=20.0;
-      orb.day_target=155.0;
-      orb.daily_on=true;
-      g_tester_risk_money=1100.0;
-      g_tester_target=orb.day_target;
-     }
-   else
-     {
-      orb.weekdays=(InpOrbWeekdays==25 ? 29 : InpOrbWeekdays);
-      orb.morning_fade=InpOrbMorningFade;
-      orb.day_shots=InpDayShots;
-      orb.fixed_stop=InpOrbFixedStopPoints;
-      orb.day_target=InpDayShotTarget;
-      g_tester_target=orb.day_target;
-     }
+   // Fixed 5-rule book for the live chart and Strategy Tester. A saved
+   // chart or an old tester .set cannot change the windows, stops, or targets.
+   orb.weekdays=29;             // Mon/Wed/Thu/Fri 15:00 London (11:00 NY) trend
+   orb.morning_fade=false;
+   orb.day_shots=true;
+   orb.fixed_stop=20.0;
+   orb.day_target=155.0;
+   orb.daily_on=true;
+   g_tester_risk_money=1100.0;
+   g_tester_target=orb.day_target;
    g_orb.Configure(orb);
 
    g_last_bar_time=iTime(_Symbol,InpEntryTimeframe,0);
    ShowBotLabel();
+   Print("PASS BOT v6.50 | US100.cash 5-Rule Sniper Book | 07:30 London Fade ($660) · 14:00 Thu Snapback ($1,100) · 15:00 London Trend ($1,100) / Fade ($660) · 18:30 Wed-Fri Drive ($660) | Runner: 50% @ +0.75R, SL -> -0.70R, +4R -> +1.5R | Daily Cap: +$600 / -$2,000");
    PrintFormat("EA|event=initialized|bot=%s|symbol=%s|entry=%s|structure=%s|bias=%s|magic=%I64u",
                BotLabel(),_Symbol,EnumToString(InpEntryTimeframe),EnumToString(InpStructureTimeframe),
                EnumToString(InpBiasTimeframe),InpMagicNumber);
