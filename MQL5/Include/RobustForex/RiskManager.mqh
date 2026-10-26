@@ -37,6 +37,11 @@ private:
       return m_prefix+"_LOCK";
      }
 
+   string EodPeakKey(void) const
+     {
+      return m_prefix+"_EODPEAK";
+     }
+
    double LossForPosition(const string symbol,
                           const ENUM_POSITION_TYPE position_type,
                           const double volume,
@@ -62,9 +67,11 @@ public:
       if((bool)MQLInfoInteger(MQL_TESTER))
         {
          double equity=AccountInfoDouble(ACCOUNT_EQUITY);
+         double balance=AccountInfoDouble(ACCOUNT_BALANCE);
          GlobalVariableSet(DayStampKey(),(double)DayKey());
          GlobalVariableSet(DayEquityKey(),equity);
          GlobalVariableSet(PeakKey(),equity);
+         GlobalVariableSet(EodPeakKey(),balance);
          if(GlobalVariableCheck(LockKey()))
             GlobalVariableDel(LockKey());
         }
@@ -74,6 +81,7 @@ public:
    void RefreshAnchors(void)
      {
       double equity=AccountInfoDouble(ACCOUNT_EQUITY);
+      double balance=AccountInfoDouble(ACCOUNT_BALANCE);
 
       // Re-anchor only when the calendar day actually changes, so restarting
       // mid-session does not hand the day a fresh loss budget.
@@ -84,13 +92,30 @@ public:
         {
          GlobalVariableSet(DayStampKey(),today);
          GlobalVariableSet(DayEquityKey(),equity);
+         // FTMO 1-Step 10% EOD Trailing Max Loss updates its peak at End-of-Day rollover.
+         if(!GlobalVariableCheck(EodPeakKey()) || balance>GlobalVariableGet(EodPeakKey()))
+            GlobalVariableSet(EodPeakKey(),balance);
         }
+      if(!GlobalVariableCheck(EodPeakKey()))
+         GlobalVariableSet(EodPeakKey(),balance);
 
       string peak_key=PeakKey();
       if(!GlobalVariableCheck(peak_key))
          GlobalVariableSet(peak_key,equity);
       else if(equity>GlobalVariableGet(peak_key))
          GlobalVariableSet(peak_key,equity);
+     }
+
+   double DayStartEquity(void)
+     {
+      RefreshAnchors();
+      return GlobalVariableGet(DayEquityKey());
+     }
+
+   double EodPeakBalance(void)
+     {
+      RefreshAnchors();
+      return GlobalVariableGet(EodPeakKey());
      }
 
    double NormalizePrice(const string symbol,const double price) const
@@ -259,7 +284,8 @@ public:
                 string &reason,
                 const double max_daily_loss_money=0.0,
                 const double max_drawdown_money=0.0,
-                const bool halt_on_drawdown=false)
+                const bool halt_on_drawdown=false,
+                const double max_daily_profit_lock_money=0.0)
      {
       RefreshAnchors();
       double equity=AccountInfoDouble(ACCOUNT_EQUITY);
@@ -271,6 +297,17 @@ public:
          reason="daily_loss_lock";
          return false;
         }
+      // FTMO 1-Step 50% Consistency guard: if today's realized profit has already
+      // reached the daily lock threshold, do not open a new trade today.
+      if(max_daily_profit_lock_money>0.0 && daily_start>0.0)
+        {
+         double day_profit=equity-daily_start;
+         if(day_profit>=max_daily_profit_lock_money)
+           {
+            reason="consistency_daily_profit_lock";
+            return false;
+           }
+        }
       // FTMO's daily loss is a fixed dollar line. Block the trade when
       // today's loss plus this trade's full stop would reach it.
       if(max_daily_loss_money>0.0 && daily_start>0.0)
@@ -279,7 +316,7 @@ public:
          if(day_loss<0.0)
             day_loss=0.0;
          double new_risk_money=equity*new_risk_percent/100.0;
-         if(day_loss+new_risk_money>=max_daily_loss_money)
+         if(day_loss+new_risk_money>max_daily_loss_money+1e-6)
            {
             reason="daily_loss_money_lock";
             return false;

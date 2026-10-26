@@ -1,17 +1,15 @@
-"""Live view of the US100.cash FTMO $100k Pass Bot. Read only. Sends no orders.
+"""Live view of the US100.cash pass bot. Read only. Sends no orders.
 
 The page listens on this PC, ports 8765 and 18765.
-127.0.0.1 only works in a browser on this PC. From the laptop, open the
-PC's own address on the same network, or the tunnel URL printed at startup.
 """
 
 import json
-import math
 import re
 import threading
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 class _Mt5:
@@ -25,519 +23,637 @@ mt5 = _Mt5()
 
 SYMBOL = "US100.cash"
 MAGIC = 26101201
-SPREAD_MAX = 250
 SHOT_POINTS = 60.0
-SHOT_STOP = 20.0
-SHOT_TARGET = 155.0
-SHOT_RISK = 1100.0
 FALLBACK_MIN = 10.0
-FALLBACK_STOP = 20.0
-FALLBACK_TARGET = 120.0
-FALLBACK_RISK = 660.0
 PM_DRIVE_POINTS = 80.0
-PM_DRIVE_STOP = 20.0
-PM_DRIVE_TARGET = 100.0
-PM_DRIVE_RISK = 660.0
 LONDON_MIN = 5.0
 LONDON_MAX = 30.0
-LONDON_STOP = 15.0
-LONDON_TARGET = 90.0
-LONDON_RISK = 660.0
+SPREAD_CAP = 2.50
 HOST = "0.0.0.0"
 PORTS = (8765, 18765)
-JOURNAL = Path(r"C:\Users\user\AppData\Roaming\MetaQuotes\Terminal\D0E8209F77C8CF37AD8BF550E51FF075\logs")
 
 PAGE = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PASS BOT — US100.cash FTMO $100k</title>
+<title>Portal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0b0e14;
-    --panel: #121722;
-    --panel-alt: #171e2c;
-    --border: #232c3d;
-    --text: #e6edf3;
-    --muted: #8b949e;
-    --green: #2ea043;
-    --green-bright: #3fb950;
-    --red: #f85149;
-    --blue: #388bfd;
-    --gold: #d29922;
-    --gold-bright: #e3b341;
+    --bg: #090b10;
+    --card: #10141d;
+    --card-2: #131824;
+    --line: rgba(255,255,255,0.07);
+    --text: #e8edf5;
+    --muted: #7d8590;
+    --green: #10b981;
+    --red: #f43f5e;
+    --gold: #e3b341;
+    --sans: Inter, "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", "SFMono-Regular", "SF Mono", ui-monospace, Consolas, monospace;
+    --lift: inset 0 1px 0 rgba(255,255,255,0.06);
   }
   * { box-sizing: border-box; }
-  html, body {
-    margin: 0;
-    min-height: 100%;
-    background: var(--bg);
+  html, body { margin: 0; min-height: 100%; }
+  body {
     color: var(--text);
-    font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
-  }
-  body { display: flex; flex-direction: column; padding-bottom: 20px; }
-
-  /* Top Bar */
-  header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 14px;
-    padding: 12px 20px;
-    background: var(--panel);
-    border-bottom: 1px solid var(--border);
-  }
-  .brand { display: flex; align-items: center; gap: 12px; }
-  .badge-bot {
-    background: rgba(56, 139, 253, 0.16);
-    color: #58a6ff;
-    border: 1px solid rgba(56, 139, 253, 0.4);
-    padding: 4px 10px;
-    border-radius: 6px;
-    font-weight: 700;
-    font-size: 12px;
-    letter-spacing: 0.4px;
-  }
-  .symbol-tag { font-weight: 700; font-size: 15px; color: #fff; }
-  .sub-tag { color: var(--muted); font-size: 12px; }
-
-  .clocks {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    background: var(--bg);
-    padding: 6px 14px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
+    font: 14px/1.4 var(--sans);
     font-variant-numeric: tabular-nums;
+    color-scheme: dark;
+    background:
+      radial-gradient(900px 420px at 0% -10%, rgba(16,185,129,0.07), transparent 55%),
+      var(--bg);
+    padding: 20px 22px 48px;
   }
-  .clock-item span { color: var(--muted); font-size: 11px; text-transform: uppercase; margin-right: 6px; }
-  .clock-item b { color: #fff; font-size: 13px; }
-  .pulse {
-    width: 8px; height: 8px; border-radius: 50%;
-    background: var(--green-bright);
-    display: inline-block;
-    box-shadow: 0 0 8px var(--green-bright);
-    animation: pulse 1.6s ease-in-out infinite;
-  }
-  @keyframes pulse { 50% { opacity: 0.3; } }
-
-  /* FTMO Metrics Strip */
-  .metrics-bar {
-    display: grid;
-    grid-template-columns: repeat(6, 1fr);
-    gap: 10px;
-    padding: 12px 20px;
-    background: var(--bg);
-    border-bottom: 1px solid var(--border);
-  }
-  .metric-card {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 10px 14px;
-  }
-  .metric-card .lbl { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; }
-  .metric-card .val { font-size: 16px; font-weight: 700; color: #fff; margin-top: 3px; font-variant-numeric: tabular-nums; }
-  .metric-card .sub { color: var(--muted); font-size: 11px; margin-top: 2px; }
-  .good { color: var(--green-bright) !important; }
-  .bad { color: var(--red) !important; }
-  .warn { color: var(--gold-bright) !important; }
-
-  /* Status Banner */
-  .banner {
-    margin: 12px 20px 0;
-    padding: 10px 16px;
-    background: var(--panel-alt);
-    border: 1px solid var(--border);
-    border-left: 4px solid var(--blue);
-    border-radius: 8px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 10px;
-  }
-  .banner-text { font-weight: 600; color: #fff; font-size: 13px; }
-  .runner-pill {
-    font-size: 12px;
-    color: #c9d1d9;
-    background: rgba(255,255,255,0.05);
-    padding: 4px 10px;
-    border-radius: 6px;
-    border: 1px solid var(--border);
-  }
-
-  /* 5-Rule Playbook Grid */
-  .section-head {
-    padding: 14px 20px 8px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-  .section-head h2 {
-    margin: 0;
-    font-size: 13px;
-    text-transform: uppercase;
-    letter-spacing: 0.6px;
-    color: var(--muted);
-  }
-  .ideas {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 12px;
-    padding: 0 20px;
-  }
-  .idea {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-top: 3px solid #30363d;
-    border-radius: 10px;
-    padding: 14px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    transition: border-color 0.2s, transform 0.15s;
-  }
-  .idea.weighing { border-top-color: var(--blue); }
-  .idea.close { border-top-color: var(--gold-bright); background: #161c28; }
-  .idea.ready.buy { border-top-color: var(--green-bright); box-shadow: 0 0 16px rgba(63,185,80,0.15); }
-  .idea.ready.sell { border-top-color: var(--red); box-shadow: 0 0 16px rgba(248,81,73,0.15); }
-  .idea.in { border-top-color: var(--green-bright); background: #14201b; }
-  .idea.passed, .idea.aside { opacity: 0.72; }
-
-  .idea-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 8px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--border);
-  }
-  .idea-title { font-weight: 700; font-size: 14px; color: #fff; }
-  .idea-time { color: var(--muted); font-size: 11px; margin-top: 2px; }
-  .state {
-    font-size: 11px;
-    font-weight: 700;
-    padding: 3px 8px;
-    border-radius: 99px;
-    white-space: nowrap;
-    background: rgba(255,255,255,0.06);
-    color: var(--muted);
-  }
-  .state.watching { color: #58a6ff; background: rgba(56,139,253,0.14); }
-  .state.close { color: var(--gold-bright); background: rgba(210,153,34,0.18); }
-  .state.ready.buy { color: #fff; background: var(--green); }
-  .state.ready.sell { color: #fff; background: var(--red); }
-  .state.in { color: #fff; background: var(--green); }
-
-  .lead {
-    margin: 10px 0;
-    color: #fff;
-    font-size: 13px;
-    font-weight: 500;
-    min-height: 36px;
-  }
-  .facts {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px 10px;
-    padding: 10px;
-    background: var(--bg);
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    margin-bottom: 10px;
-  }
-  .fact span { display: block; color: var(--muted); font-size: 11px; }
-  .fact b {
-    display: block;
-    margin-top: 2px;
-    color: #fff;
-    font-weight: 700;
-    font-size: 13px;
-    font-variant-numeric: tabular-nums;
-  }
-  .fact b.tick, .clock-val.tick { animation: settle 0.8s ease; }
-  @keyframes settle { from { color: var(--gold-bright); } to { color: #fff; } }
-  .idea-foot { color: var(--muted); font-size: 11.5px; line-height: 1.4; }
-
-  /* Main Workspace: Chart + Side Panel */
-  .workspace {
-    display: grid;
-    grid-template-columns: 2fr 1fr;
-    gap: 14px;
-    padding: 14px 20px 0;
-  }
+  .shell { width: 100%; max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
   .card {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
+    background: linear-gradient(180deg, rgba(255,255,255,0.035), transparent 42px), var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: var(--lift);
   }
-  .card-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 10px 14px;
-    background: var(--panel-alt);
-    border-bottom: 1px solid var(--border);
-    font-weight: 700;
-    color: #fff;
+  .top {
+    position: sticky; top: 10px; z-index: 3;
+    display: flex; align-items: center; gap: 0;
+    padding: 12px 14px 12px 18px;
+    backdrop-filter: blur(16px);
   }
-  .card-head .px { font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .card-head .px b { color: #fff; font-weight: 700; margin-left: 4px; }
-
-  .chartwrap { position: relative; height: 390px; background: #090c10; }
-  svg { width: 100%; height: 100%; display: block; }
-  .corner {
-    position: absolute; left: 12px; top: 10px;
-    color: #c9d1d9; font-size: 12px; white-space: pre;
-    line-height: 1.4; text-shadow: 1px 1px 2px #000;
-    pointer-events: none;
-    background: rgba(11,14,20,0.75);
-    padding: 6px 10px;
-    border-radius: 6px;
-    border: 1px solid var(--border);
-  }
-
-  .side-stack { display: flex; flex-direction: column; gap: 14px; }
-  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-  th {
-    text-align: left; color: var(--muted); font-weight: 600;
-    font-size: 11px; text-transform: uppercase;
-    padding: 8px 12px; background: var(--bg);
-    border-bottom: 1px solid var(--border);
-  }
-  td { padding: 9px 12px; border-bottom: 1px solid var(--border); color: var(--text); }
-  td.up { color: var(--green-bright); font-weight: 700; }
-  td.down { color: var(--red); font-weight: 700; }
-  .side.buy { color: var(--green-bright); font-weight: 700; text-transform: uppercase; }
-  .side.sell { color: var(--red); font-weight: 700; text-transform: uppercase; }
-  .empty { padding: 16px; color: var(--muted); font-size: 12.5px; }
-
-  #lines { padding: 8px 14px; max-height: 220px; overflow-y: auto; }
-  .jrow {
-    display: flex; gap: 12px; padding: 5px 0;
-    border-bottom: 1px solid rgba(255,255,255,0.04);
+  .brand {
+    flex: 0 0 auto;
+    margin-right: 8px;
+    padding-right: 14px;
+    border-right: 1px solid var(--line);
     font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text);
   }
-  .jrow:last-child { border-bottom: none; }
-  .jrow span { color: var(--muted); min-width: 48px; font-variant-numeric: tabular-nums; }
-  .jrow b { font-weight: 500; color: #d0d7de; }
-  .jrow.buy b, .jrow.sell b { color: var(--green-bright); }
-  .jrow.reject b { color: var(--red); }
-
-  @media (max-width: 1300px) {
-    .ideas { grid-template-columns: repeat(3, 1fr); }
-    .metrics-bar { grid-template-columns: repeat(3, 1fr); }
-    .workspace { grid-template-columns: 1fr; }
+  .metrics { display: flex; flex-wrap: wrap; align-items: center; min-width: 0; flex: 1; }
+  .metric { padding: 2px 16px; min-width: 0; }
+  .metric + .metric { box-shadow: inset 1px 0 0 var(--line); }
+  .metric span, .kicker, .panel h2, .fact span {
+    display: block;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
   }
-  @media (max-width: 780px) {
-    .ideas { grid-template-columns: 1fr; }
-    .metrics-bar { grid-template-columns: repeat(2, 1fr); }
+  th {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .num {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    font-size: 16px;
+    letter-spacing: -0.03em;
+    color: #f4f7fb;
+  }
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    margin-left: 8px; flex: none;
+    padding: 7px 12px; border-radius: 999px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+  }
+  .pill.live { color: #6ee7b7; background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.38); }
+  .pill.locked { color: #fda4af; background: rgba(244,63,94,0.12); border: 1px solid rgba(244,63,94,0.35); }
+  .pill i {
+    width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: block;
+  }
+  .pill.live i { background: var(--green); box-shadow: 0 0 0 0 rgba(16,185,129,0.65); animation: pulse 1.8s ease-out infinite; }
+  @keyframes pulse {
+    70% { box-shadow: 0 0 0 7px rgba(16,185,129,0); }
+    100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
+  }
+  .trade { padding: 12px 16px; color: var(--muted); font-size: 13px; }
+  .trade.live {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px;
+    color: var(--text);
+    border-color: rgba(16,185,129,0.32);
+    background:
+      linear-gradient(180deg, rgba(16,185,129,0.10), transparent 48px),
+      var(--card);
+    box-shadow: var(--lift), 0 10px 32px rgba(16,185,129,0.06);
+  }
+  .trade.live.sell {
+    border-color: rgba(244,63,94,0.32);
+    background:
+      linear-gradient(180deg, rgba(244,63,94,0.10), transparent 48px),
+      var(--card);
+    box-shadow: var(--lift), 0 10px 32px rgba(244,63,94,0.06);
+  }
+  .kv { display: flex; flex-direction: column; gap: 1px; }
+  .kv span { color: var(--muted); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; }
+  .kv b { font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 600; font-size: 14px; }
+  .side { font-weight: 700; letter-spacing: 0.06em; font-size: 13px; }
+  .side.buy { color: var(--green); }
+  .side.sell { color: var(--red); }
+  .pnl { margin-left: auto; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 28px; font-weight: 700; letter-spacing: -0.04em; text-align: right; }
+  .pnl small { display: block; margin-top: 1px; font-size: 12px; font-weight: 600; letter-spacing: 0; color: var(--muted); }
+  .up { color: var(--green); }
+  .down { color: var(--red); }
+  .hero { padding: 18px 18px 16px; display: grid; grid-template-columns: 1fr auto; gap: 6px 18px; align-items: end; }
+  .hero.next {
+    border-color: rgba(227,179,65,0.34);
+    background:
+      linear-gradient(180deg, rgba(227,179,65,0.09), transparent 70px),
+      var(--card);
+    box-shadow: var(--lift), 0 14px 40px rgba(227,179,65,0.05);
+  }
+  .hero h1 { margin: 2px 0 0; font-family: var(--mono); font-weight: 700; font-size: 30px; letter-spacing: -0.045em; }
+  .hero h1 em { font-style: normal; color: var(--muted); font-size: 15px; font-weight: 500; margin-left: 10px; }
+  .count { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 28px; font-weight: 700; color: var(--gold); letter-spacing: -0.04em; }
+  .line { grid-column: 1 / -1; color: #c5ceda; font-size: 15px; margin-top: 2px; }
+  .facts { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .fact {
+    flex: 1 1 190px;
+    background: var(--card-2);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 9px 12px;
+    box-shadow: var(--lift);
+  }
+  .fact b { display: block; margin-top: 3px; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 13px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.35; }
+  .verdict { grid-column: 1 / -1; margin-top: 4px; font-family: var(--mono); font-size: 15px; font-weight: 600; letter-spacing: -0.02em; }
+  .panel { padding: 14px 14px 12px; }
+  .panel h2 { margin: 0 0 10px; font-weight: 600; }
+  .head-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; min-width: 0; }
+  .head-row h2 { margin: 0; }
+  .px { min-width: 0; color: var(--muted); font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 12px; }
+  .px b { color: var(--text); font-weight: 600; }
+  .px b.wide { color: var(--red); }
+  td.read { color: #c5ceda; font-family: var(--sans); font-size: 13.5px; }
+  tbody tr.next { background: rgba(16,185,129,0.045); }
+  tbody tr.next:hover { background: rgba(16,185,129,0.08); }
+  tbody tr.later { background: rgba(227,179,65,0.035); }
+  .wide { color: var(--red); }
+  .chart-frame { width: 100%; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: #0c1018; }
+  canvas { display: block; width: 100%; max-width: 100%; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th:nth-child(1), td:nth-child(1) { width: 16%; }
+  th:nth-child(2), td:nth-child(2) { width: 28%; }
+  th:nth-child(3), td:nth-child(3) { width: 24%; }
+  th:nth-child(4), td:nth-child(4) { width: 32%; }
+  th { text-align: left; font-weight: 600; padding: 0 12px 8px 12px; }
+  td {
+    padding: 11px 12px;
+    border-top: 1px solid var(--line);
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    vertical-align: middle;
+  }
+  td.name { font-family: var(--sans); font-size: 14px; }
+  tbody tr { transition: background .15s ease; }
+  tbody tr:hover { background: rgba(255,255,255,0.03); }
+  .badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 84px; border-radius: 999px; padding: 3px 10px;
+    font-family: var(--sans); font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+    border: 1px solid transparent;
+  }
+  .badge.done { color: #9aa3af; background: rgba(255,255,255,0.04); }
+  .badge.next { color: #6ee7b7; background: rgba(16,185,129,0.12); border-color: rgba(16,185,129,0.32); }
+  .badge.off { color: #6e7681; background: transparent; border-color: var(--line); }
+  .badge.later { color: #f0d78c; background: rgba(227,179,65,0.10); border-color: rgba(227,179,65,0.28); }
+  #fills.hide { display: none; }
+  @media (max-width: 760px) {
+    body { padding: 12px 12px 32px; }
+    .top { flex-wrap: wrap; padding: 10px 12px; align-items: flex-start; }
+    .metrics { flex: 1 1 100%; gap: 8px 0; }
+    .metric { flex: 1 1 46%; padding: 6px 10px; }
+    .metric + .metric { box-shadow: none; }
+    .pill { margin: 8px 0 2px 10px; }
+    .hero { grid-template-columns: 1fr; }
+    .hero h1 { font-size: 24px; }
+    .hero h1 em { display: inline-block; margin: 4px 0 0; }
+    .count { font-size: 22px; justify-self: start; }
+    .head-row { flex-direction: column; align-items: flex-start; gap: 4px; }
+    .badge { min-width: 0; padding: 3px 8px; }
+    td, th { padding-left: 8px; padding-right: 8px; }
+    .pnl { margin-left: 0; width: 100%; font-size: 26px; }
+    .fact { flex-basis: 100%; }
   }
 </style>
 </head>
 <body>
-
-<header>
-  <div class="brand">
-    <span class="badge-bot">PASS BOT v6.30</span>
-    <div>
-      <div class="symbol-tag">US100.cash (Nasdaq 100) · M5</div>
-      <div class="sub-tag">5-Rule Book · 2-Stage Smart Runner (40% @ +1R &amp; -0.60R Cushion · +4R Locks +1.5R)</div>
-    </div>
-  </div>
-  <div class="clocks">
-    <div class="clock-item"><span>UK Time</span><b class="clock-val" id="clock-uk">--:--:--</b></div>
-    <div class="clock-item"><span>NY Time</span><b class="clock-val" id="clock-ny">--:--:--</b></div>
-    <i class="pulse" title="Live connection to MT5"></i>
-  </div>
-</header>
-
-<section class="metrics-bar" id="metrics"></section>
-
-<div class="banner">
-  <div class="banner-text" id="board">Connecting to MetaTrader 5...</div>
-  <div class="runner-pill">Shot Risk: <b>$1,100</b> (Full TP <b>+$5,555</b>) · Half-Shot Risk: <b>$660</b> (Full TP <b>+$2,640</b>)</div>
-</div>
-
-<div class="section-head">
-  <h2>Daily 5-Rule Schedule (Monday – Friday)</h2>
-</div>
-<section class="ideas" id="think"></section>
-
-<section class="workspace">
-  <div class="card">
-    <div class="card-head" id="head-nas"><span>US100.cash · M5 Live Chart</span></div>
-    <div class="chartwrap">
-      <svg id="chart-nas" viewBox="0 0 820 400" preserveAspectRatio="none"></svg>
-      <div class="corner" id="note-nas"></div>
-    </div>
-  </div>
-
-  <div class="side-stack">
-    <div class="card">
-      <div class="card-head"><span>Open Position</span></div>
-      <div id="trades"><div class="empty">No open trade — bot is flat and watching the next window.</div></div>
-    </div>
-
-    <div class="card">
-      <div class="card-head"><span>Weekly Schedule Overview (UK Time)</span></div>
-      <table>
-        <tr><th>Window (UK)</th><th>Setup</th><th>Active Days</th><th>Risk / Target</th></tr>
-        <tr><td><b>08:30 UK</b> (03:30 NY)</td><td>London Range-Fade (5..30 pts)</td><td>Mon Tue Wed Thu Fri</td><td>$660 · 15 SL / 90 TP</td></tr>
-        <tr><td><b>15:00 UK</b> (10:00 NY)</td><td>Thu 10am Snapback Fade (60+ pts)</td><td>Thursday only</td><td>$1,100 · 20 SL / 155 TP</td></tr>
-        <tr><td><b>16:00 UK</b> (11:00 NY)</td><td>11am Big Trend Shot (60+ pts)</td><td>Mon Wed Thu Fri</td><td>$1,100 · 20 SL / 155 TP</td></tr>
-        <tr><td><b>16:00 UK</b> (11:00 NY)</td><td>11am Mod Range-Fade (10..60 pts)</td><td>Mon Tue Wed</td><td>$660 · 20 SL / 120 TP</td></tr>
-        <tr><td><b>19:30 UK</b> (14:30 NY)</td><td>Afternoon Drive (80+ pts)</td><td>Wed Thu Fri</td><td>$660 · 20 SL / 100 TP</td></tr>
-      </table>
-    </div>
-
-    <div class="card">
-      <div class="card-head"><span>Recent MT5 Journal</span></div>
-      <div id="lines"></div>
-    </div>
-  </div>
+<div class="shell">
+<header class="top card" id="top"></header>
+<div class="trade card flat" id="trade">Flat</div>
+<section class="hero card" id="hero"></section>
+<section class="panel card">
+  <div class="head-row" id="chart-head"><h2>US100.cash · M5</h2></div>
+  <div class="chart-frame"><canvas id="chart"></canvas></div>
 </section>
-
+<section class="panel card">
+  <h2>Today's windows</h2>
+  <table>
+    <thead><tr><th>London</th><th>Setup</th><th>Status</th><th>Readout</th></tr></thead>
+    <tbody id="windows"></tbody>
+  </table>
+</section>
+<section class="panel card hide" id="fills">
+  <h2>Today's fills</h2>
+  <table>
+    <thead><tr><th>London</th><th>Side</th><th>Lots</th><th>Price</th><th>Result</th></tr></thead>
+    <tbody id="fill-rows"></tbody>
+  </table>
+</section>
+</div>
 <script>
 function esc(s) {
-  return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;");
+  return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
 }
-function htag(parts, y, price, color, text, x0, x1, dash) {
-  const yy = y(price);
-  const dashAttr = dash ? ' stroke-dasharray="4 4"' : "";
-  parts.push('<line x1="'+x0+'" x2="'+x1+'" y1="'+yy+'" y2="'+yy+'" stroke="'+color+'" stroke-width="1.2"'+dashAttr+'/>');
-  const w = Math.max(54, text.length * 7.2);
-  parts.push('<rect x="'+(x1+4)+'" y="'+(yy-9)+'" width="'+w+'" height="18" rx="3" fill="'+color+'"/>');
-  parts.push('<text x="'+(x1+4+w/2)+'" y="'+(yy+4)+'" fill="#000" font-weight="700" font-size="11" text-anchor="middle">'+text+'</text>');
+function money(n) {
+  if (n == null || Number.isNaN(n)) return "—";
+  const sign = n > 0 ? "+" : "";
+  return sign + "$" + Number(n).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
 }
-function draw(id, chart) {
-  const svg = document.getElementById(id);
-  const bars = (chart && chart.bars) || [];
-  if (!bars.length) { svg.innerHTML = ""; return; }
-  const levels = chart.levels || [];
-  const left = 10, right = 735, top = 16, bottom = 372;
-  let lo = Math.min(...bars.map(b => b.l));
-  let hi = Math.max(...bars.map(b => b.h));
-  levels.forEach(level => {
-    if (level.price) { lo = Math.min(lo, level.price); hi = Math.max(hi, level.price); }
-  });
-  const span0 = Math.max(hi - lo, 0.5);
-  lo -= span0 * 0.08;
-  hi += span0 * 0.08;
-  const span = hi - lo;
-  const y = p => top + (hi - p) / span * (bottom - top);
-  const cw = (right - left) / bars.length;
-  const parts = [];
-  for (let i = 0; i <= 5; i++) {
-    const p = lo + span * i / 5;
-    const yy = y(p);
-    parts.push('<line x1="'+left+'" x2="'+right+'" y1="'+yy+'" y2="'+yy+'" stroke="#1b2230"/>');
-    parts.push('<text x="742" y="'+(yy+4)+'" fill="#8b949e" font-size="11">'+p.toFixed(2)+'</text>');
+function plainMoney(n) {
+  if (n == null || Number.isNaN(n)) return "—";
+  return "$" + Number(n).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+function cls(n) { return n > 0 ? "up" : (n < 0 ? "down" : ""); }
+function metric(label, value, extra) {
+  return '<div class="metric"><span>'+label+'</span><b class="num'+(extra ? " "+extra : "")+'">'+value+'</b></div>';
+}
+function parsePx(text) {
+  const n = Number(String(text == null ? "" : text).replace(/,/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
+function signedMoney(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return "";
+  const sign = v > 0 ? "+" : (v < 0 ? "-" : "");
+  return sign + "$" + Math.abs(v).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+function rText(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return "";
+  return (v > 0 ? "+" : "") + v.toFixed(2) + "R";
+}
+function roundRect(ctx, x, y, w, h, r) {
+  const rr = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
+}
+let lastChart = null;
+function draw(chart, retry) {
+  lastChart = chart;
+  const canvas = document.getElementById("chart");
+  const frame = canvas.parentElement;
+  canvas.style.width = "100%";
+  const cssW = frame.clientWidth;
+  if (cssW < 20) {
+    if (!retry) requestAnimationFrame(() => { if (lastChart) draw(lastChart, true); });
+    return;
   }
-  const step = Math.max(8, Math.round(bars.length / 6));
-  for (let i = 0; i < bars.length; i += step) {
-    const x = left + i * cw;
-    parts.push('<line x1="'+x+'" x2="'+x+'" y1="'+top+'" y2="'+bottom+'" stroke="#1b2230"/>');
-    parts.push('<text x="'+(x+2)+'" y="392" fill="#8b949e" font-size="11">'+bars[i].t+' NY</text>');
+  const cssH = cssW < 640 ? 260 : 380;
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  const bw = Math.round(cssW * dpr);
+  const bh = Math.round(cssH * dpr);
+  if (canvas.width !== bw || canvas.height !== bh) {
+    canvas.width = bw;
+    canvas.height = bh;
+  }
+  canvas.style.width = "100%";
+  canvas.style.height = cssH + "px";
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = "#0c1018";
+  ctx.fillRect(0, 0, cssW, cssH);
+  const bars = (chart && chart.bars) || [];
+  if (!bars.length) {
+    ctx.fillStyle = "#7d8590";
+    ctx.font = "500 13px Inter, sans-serif";
+    ctx.fillText("Waiting for bars", 16, 28);
+    return;
+  }
+  const compact = cssW < 560;
+  const pos = chart.position || null;
+  const entry = pos ? parsePx(pos.entry) : null;
+  const initialSl = pos ? parsePx(pos.initial_sl) : null;
+  const stopPx = pos ? parsePx(pos.sl) : null;
+  const tpPx = pos ? parsePx(pos.tp) : null;
+  const partialPx = pos ? parsePx(pos.partial) : null;
+  const lockPx = pos ? parsePx(pos.lock4) : null;
+  const markPx = pos ? parsePx(pos.price) : null;
+  const buy = pos ? String(pos.side || "").toUpperCase() !== "SELL" : true;
+  const bid = parsePx(chart.bid);
+  let lo = Math.min.apply(null, bars.map(b => b.l));
+  let hi = Math.max.apply(null, bars.map(b => b.h));
+  let showTp = false;
+  let showLock = false;
+  if (pos && entry != null) {
+    [entry, initialSl, stopPx, partialPx, markPx].forEach(p => {
+      if (p != null) { lo = Math.min(lo, p); hi = Math.max(hi, p); }
+    });
+    const core = Math.max(hi - lo, Number(pos.r_pts) || 20);
+    const room = core * 1.9;
+    function take(p) {
+      if (p == null) return false;
+      return (Math.max(hi, p) - Math.min(lo, p)) <= room;
+    }
+    if (take(lockPx)) { lo = Math.min(lo, lockPx); hi = Math.max(hi, lockPx); showLock = true; }
+    if (take(tpPx)) { lo = Math.min(lo, tpPx); hi = Math.max(hi, tpPx); showTp = true; }
+    else if (tpPx != null) {
+      const extra = Math.max(core * 0.28, (Number(pos.r_pts) || 20) * 1.2);
+      if (buy) hi += extra; else lo -= extra;
+    }
+  }
+  const tags = [];
+  (chart.levels || []).forEach(level => {
+    const price = Number(level.price);
+    if (!Number.isFinite(price)) return;
+    if (pos && (price < lo || price > hi)) return;
+    const priceText = price.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    const label = String(level.label || "");
+    const text = (!compact && /^[+-]/.test(label)) ? (label + "  " + priceText) : priceText;
+    tags.push({price: price, color: level.color || "#e8edf5", dash: !!level.dash, text: text, kind: "level"});
+  });
+  if (!pos && bid != null) {
+    tags.push({
+      price: bid,
+      color: "#f4f7fb",
+      dash: false,
+      text: bid.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2}),
+      kind: "bid"
+    });
+  }
+  if (pos && entry != null) {
+    const priceText = p => p.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    tags.push({price: entry, color: "#e3b341", dash: false, text: "ENTRY  " + priceText(entry), kind: "level"});
+    if (stopPx != null) {
+      const risk = signedMoney(pos.locked_dollars);
+      const moved = initialSl == null || Math.abs(stopPx - initialSl) >= 0.05;
+      tags.push({price: stopPx, color: "#f43f5e", dash: true, text: "SL" + (risk ? "  " + risk : ""), kind: "level", line: moved});
+    }
+    if (partialPx != null && !pos.partial_taken) {
+      tags.push({
+        price: partialPx,
+        color: "#10b981",
+        dash: true,
+        text: compact ? "+0.75R" : "+0.75R (50% partial)",
+        kind: "level"
+      });
+    }
+    if (showLock && lockPx != null) {
+      tags.push({price: lockPx, color: "#6ee7b7", dash: true, text: "+4R lock", kind: "level"});
+    }
+    if (showTp && tpPx != null) {
+      const goal = signedMoney(pos.target_dollars);
+      tags.push({price: tpPx, color: "#10b981", dash: false, text: "TP" + (goal ? "  " + goal : ""), kind: "level"});
+    }
+    const livePx = markPx != null ? markPx : bid;
+    if (livePx != null) {
+      tags.push({
+        price: livePx,
+        color: "#f4f7fb",
+        dash: false,
+        text: "LIVE  " + signedMoney(pos.pnl) + "  ·  " + rText(pos.r_multiple),
+        kind: "bid"
+      });
+    }
+  }
+  ctx.font = '600 11px "JetBrains Mono", Consolas, monospace';
+  let gutter = 72;
+  tags.forEach(tag => { gutter = Math.max(gutter, ctx.measureText(tag.text).width + 20); });
+  gutter = Math.min(gutter, Math.max(88, cssW * 0.42));
+  const left = 10, right = Math.max(left + 40, cssW - gutter - 6), top = 16, bottom = cssH - 14;
+  if (!pos) tags.forEach(tag => { lo = Math.min(lo, tag.price); hi = Math.max(hi, tag.price); });
+  const pad = Math.max(hi - lo, 1) * 0.1;
+  lo -= pad; hi += pad;
+  const span = hi - lo || 1;
+  const yOf = p => top + (hi - p) / span * (bottom - top);
+  ctx.strokeStyle = "rgba(255,255,255,0.04)";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const yy = Math.round(yOf(lo + span * i / 4)) + 0.5;
+    ctx.beginPath();
+    ctx.moveTo(left, yy);
+    ctx.lineTo(right, yy);
+    ctx.stroke();
+  }
+  const slot = (right - left) / bars.length;
+  let entryX = left;
+  if (pos && entry != null) {
+    const stamp = Number(pos.entry_time);
+    let idx = -1;
+    if (Number.isFinite(stamp)) {
+      for (let i = 0; i < bars.length; i++) {
+        const t = Number(bars[i].time);
+        if (Number.isFinite(t) && t <= stamp) idx = i;
+      }
+    }
+    entryX = idx < 0 ? left : left + idx * slot + slot * 0.5;
+    const zoneW = Math.max(0, right - entryX);
+    function fillZone(yA, yB, fill) {
+      const y1 = Math.min(yA, yB);
+      const h = Math.max(1.5, Math.abs(yB - yA));
+      ctx.fillStyle = fill;
+      ctx.fillRect(entryX, y1, zoneW, h);
+    }
+    if (initialSl != null) fillZone(yOf(entry), yOf(initialSl), "rgba(244, 63, 94, 0.18)");
+    const profitY = (showTp && tpPx != null) ? yOf(tpPx) : (buy ? top : bottom);
+    fillZone(yOf(entry), profitY, "rgba(16, 185, 129, 0.16)");
+    const liveY = markPx != null ? markPx : bid;
+    if (liveY != null) {
+      const towardTarget = buy ? liveY >= entry : liveY <= entry;
+      fillZone(yOf(entry), yOf(liveY), towardTarget ? "rgba(16, 185, 129, 0.30)" : "rgba(244, 63, 94, 0.32)");
+    }
   }
   bars.forEach((b, i) => {
-    const x = left + i * cw + cw * 0.5;
+    const x = left + i * slot + slot * 0.5;
     const up = b.c >= b.o;
-    const stroke = up ? "#3fb950" : "#f85149";
-    const fill = up ? "#2ea043" : "#f85149";
-    parts.push('<line x1="'+x+'" x2="'+x+'" y1="'+y(b.h)+'" y2="'+y(b.l)+'" stroke="'+stroke+'" stroke-width="1.2"/>');
-    const topY = y(Math.max(b.o, b.c));
-    const botY = y(Math.min(b.o, b.c));
-    parts.push('<rect x="'+(x-Math.max(1.2, cw*0.34))+'" y="'+topY+'" width="'+Math.max(2.4, cw*0.68)+'" height="'+Math.max(1.5, botY-topY)+'" fill="'+fill+'" stroke="'+stroke+'"/>');
+    const color = up ? "#10b981" : "#f43f5e";
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(Math.round(x) + 0.5, yOf(b.h));
+    ctx.lineTo(Math.round(x) + 0.5, yOf(b.l));
+    ctx.stroke();
+    const bodyW = Math.max(1.6, slot * 0.66);
+    const y1 = yOf(Math.max(b.o, b.c));
+    const y2 = yOf(Math.min(b.o, b.c));
+    ctx.fillStyle = color;
+    ctx.fillRect(x - bodyW / 2, y1, bodyW, Math.max(1, y2 - y1));
   });
-  levels.forEach(level => {
-    if (!level.price) return;
-    htag(parts, y, level.price, level.color, esc(level.label), left, right, level.dash);
-    if (level.name) {
-      const yy = y(level.price);
-      parts.push('<text x="'+(left+6)+'" y="'+(yy-5)+'" fill="'+level.color+'" font-weight="600" font-size="11">'+esc(level.name)+'</text>');
+  if (pos && entry != null) {
+    function edge(yA, yB, color) {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.25;
+      ctx.setLineDash([]);
+      [yA, yB].forEach(y => {
+        const yy = Math.round(y) + 0.5;
+        ctx.beginPath();
+        ctx.moveTo(entryX, yy);
+        ctx.lineTo(right, yy);
+        ctx.stroke();
+      });
     }
-  });
-  svg.innerHTML = parts.join("");
-}
-function head(id, chart) {
-  const el = document.getElementById(id);
-  if (!chart) { el.innerHTML = ""; return; }
-  el.innerHTML = "<span>" + esc(chart.title) + "</span><span class='px'>Bid <b>" + esc(chart.bid) + "</b> &nbsp; Ask <b>" + esc(chart.ask) + "</b> &nbsp; Spread <b>" + esc(chart.spread || "-") + "</b></span>";
-}
-function markTicks(root) {
-  if (!markTicks.prev) markTicks.prev = {};
-  const scope = root.id || "root";
-  root.querySelectorAll("[data-k]").forEach(el => {
-    const key = scope + ":" + el.getAttribute("data-k");
-    const now = el.textContent;
-    if (markTicks.prev[key] != null && markTicks.prev[key] !== now) el.classList.add("tick");
-    markTicks.prev[key] = now;
-  });
-}
-function render(data) {
-  document.getElementById("clock-uk").textContent = data.uk_clock || "--:--:--";
-  document.getElementById("clock-ny").textContent = data.ny_clock || "--:--:--";
-  document.getElementById("board").textContent = data.board || "";
-
-  const mbox = document.getElementById("metrics");
-  mbox.innerHTML = (data.metrics || []).map(m => {
-    return "<div class='metric-card'><div class='lbl'>" + esc(m.label) + "</div><div class='val " + esc(m.cls || "") + "'>" + esc(m.value) + "</div><div class='sub'>" + esc(m.sub || "") + "</div></div>";
-  }).join("");
-
-  const charts = {};
-  (data.charts || []).forEach(chart => { charts[chart.id] = chart; });
-  head("head-nas", charts.nas);
-  document.getElementById("note-nas").textContent = charts.nas ? (charts.nas.note || "") : "";
-  draw("chart-nas", charts.nas);
-
-  const root = document.getElementById("think");
-  root.innerHTML = (data.thinking || []).map(card => {
-    const side = card.side ? " " + esc(card.side) : "";
-    const weighing = (card.state === "Watching" || card.state === "Getting close" || card.state === "Ready" || card.state === "In a trade") ? " weighing" : "";
-    const facts = (card.facts || []).map(fact => {
-      return "<div class='fact'><span>" + esc(fact.label) + "</span><b class='live' data-k='" + esc(card.id) + ":" + esc(fact.label) + "'>" + esc(fact.value) + "</b></div>";
-    }).join("");
-    const lines = (card.lines || []).map(line => "<div class='idea-foot'>" + esc(line) + "</div>").join("");
-    return "<article class='idea" + weighing + " " + esc(card.tone || "") + side + "' id='idea-" + esc(card.id) + "'>" +
-      "<div><div class='idea-top'><div><div class='idea-title'>" + esc(card.name) + "</div><div class='idea-time'>" + esc(card.subtitle || "") + "</div></div>" +
-      "<span class='state " + esc(card.tone || "") + side + "'>" + esc(card.state) + "</span></div>" +
-      "<div class='lead'>" + esc(card.lead || "") + "</div></div>" +
-      "<div><div class='facts'>" + facts + "</div>" + lines + "</div></article>";
-  }).join("");
-  markTicks(root);
-
-  const trades = data.trades || [];
-  const box = document.getElementById("trades");
-  if (!trades.length) {
-    box.innerHTML = "<div class='empty'>No open trade — bot is flat and watching the next window.</div>";
-  } else {
-    const rows = trades.map(row => {
-      const cls = row.profit > 0 ? "up" : (row.profit < 0 ? "down" : "");
-      const word = row.side === "buy" ? "BUY" : "SELL";
-      const key = esc(row.ticket || row.symbol);
-      return "<tr><td><b>" + esc(row.symbol) + "</b></td><td class='side " + esc(row.side) + "'>" + word + "</td><td>" + esc(row.volume) + "</td><td>" + esc(row.price) + "</td><td data-k='" + key + ":current'>" + esc(row.current) + "</td><td>" + esc(row.sl) + "</td><td>" + esc(row.tp) + "</td><td class='pnl " + cls + "' data-k='" + key + ":profit'>$" + esc(row.profit_text) + "</td></tr>";
-    }).join("");
-    box.innerHTML = "<table><tr><th>Symbol</th><th>Side</th><th>Lots</th><th>Entry</th><th>Current</th><th>Stop</th><th>Target</th><th>Open P&amp;L</th></tr>" + rows + "</table>";
-    markTicks(box);
+    if (initialSl != null) edge(yOf(entry), yOf(initialSl), "#f43f5e");
+    edge(yOf(entry), (showTp && tpPx != null) ? yOf(tpPx) : (buy ? top : bottom), "#10b981");
+    ctx.fillStyle = "#e3b341";
+    ctx.beginPath();
+    ctx.arc(entryX, yOf(entry), 4.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#0c1018";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    if (tpPx != null && !showTp) {
+      const banner = "TP  " + tpPx.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2}) + (signedMoney(pos.target_dollars) ? "  " + signedMoney(pos.target_dollars) : "");
+      ctx.font = '600 11px "JetBrains Mono", Consolas, monospace';
+      const tw = ctx.measureText(banner).width + 14;
+      const bx = Math.max(left, right - tw - 8);
+      const by = buy ? top + 4 : bottom - 22;
+      ctx.fillStyle = "rgba(16,185,129,0.92)";
+      roundRect(ctx, bx, by, tw, 18, 6);
+      ctx.fill();
+      ctx.fillStyle = "#06281c";
+      ctx.textBaseline = "middle";
+      ctx.fillText(banner, bx + 7, by + 9);
+    }
   }
-  document.getElementById("lines").innerHTML = (data.journal || []).map(row => {
-    return "<div class='jrow " + esc(row.kind || "") + "'><span>" + esc(row.time || "") + "</span><b>" + esc(row.text || "") + "</b></div>";
-  }).join("");
+  tags.forEach(tag => {
+    if (tag.kind === "bid" || tag.line === false) return;
+    const yy = Math.round(yOf(tag.price)) + 0.5;
+    ctx.save();
+    ctx.strokeStyle = tag.color;
+    ctx.globalAlpha = tag.dash ? 0.85 : 0.95;
+    ctx.lineWidth = 1;
+    ctx.setLineDash(tag.dash ? [4, 4] : []);
+    ctx.beginPath();
+    ctx.moveTo(pos ? entryX : left, yy);
+    ctx.lineTo(right, yy);
+    ctx.stroke();
+    ctx.restore();
+  });
+  const liveTag = tags.filter(tag => tag.kind === "bid")[0];
+  if (liveTag) {
+    const yy = Math.round(yOf(liveTag.price)) + 0.5;
+    ctx.save();
+    ctx.strokeStyle = "rgba(244,247,251,0.85)";
+    ctx.setLineDash([2, 3]);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(pos ? entryX : left, yy);
+    ctx.lineTo(right, yy);
+    ctx.stroke();
+    ctx.restore();
+  }
+  const placed = tags.map(tag => ({tag: tag, y: yOf(tag.price)}));
+  placed.sort((a, b) => a.y - b.y);
+  const pillH = 18;
+  for (let i = 1; i < placed.length; i++) {
+    const minY = placed[i - 1].y + pillH + 3;
+    if (placed[i].y < minY) placed[i].y = minY;
+  }
+  if (placed.length && placed[placed.length - 1].y > bottom - 2) {
+    const shift = placed[placed.length - 1].y - (bottom - 2);
+    placed.forEach(item => { item.y -= shift; });
+  }
+  if (placed.length && placed[0].y < top + 8) {
+    const shift = top + 8 - placed[0].y;
+    placed.forEach(item => { item.y += shift; });
+  }
+  ctx.font = '600 11px "JetBrains Mono", Consolas, monospace';
+  ctx.textBaseline = "middle";
+  placed.forEach(item => {
+    const tag = item.tag;
+    const tw = ctx.measureText(tag.text).width;
+    const w = Math.min(tw + 14, cssW - right - 10);
+    const x = right + 8;
+    const y = item.y - pillH / 2;
+    ctx.fillStyle = tag.color;
+    roundRect(ctx, x, y, w, pillH, 6);
+    ctx.fill();
+    ctx.fillStyle = "#0b0e14";
+    ctx.fillText(tag.text, x + 7, item.y + 0.5);
+  });
+}
+window.addEventListener("resize", () => { if (lastChart) draw(lastChart); });
+function render(data) {
+  const day = data.day_pnl;
+  document.getElementById("top").innerHTML =
+    '<div class="brand">Portal</div>' +
+    '<div class="metrics">' +
+      metric("London", esc(data.london)) +
+      metric("New York", esc(data.ny)) +
+      metric("Balance", plainMoney(data.balance)) +
+      metric("Equity", plainMoney(data.equity)) +
+      metric("Today", money(day), cls(day)) +
+    '</div>' +
+    '<div class="pill '+(data.trading === "LIVE" ? "live" : "locked")+'"><i></i>'+esc(data.trading || "LOCKED")+'</div>';
+
+  const trade = document.getElementById("trade");
+  const pos = data.position;
+  if (!pos) {
+    trade.className = "trade card flat";
+    trade.innerHTML = "Flat";
+  } else {
+    const side = String(pos.side || "").toLowerCase();
+    trade.className = "trade card live " + side;
+    trade.innerHTML =
+      '<div class="kv"><span>Symbol</span><b>'+esc(pos.symbol)+'</b></div>' +
+      '<div class="kv"><span>Side</span><b class="side '+esc(side)+'">'+esc(side.toUpperCase())+'</b></div>' +
+      '<div class="kv"><span>Lots</span><b>'+esc(pos.volume)+'</b></div>' +
+      '<div class="kv"><span>Entry</span><b>'+esc(pos.entry)+'</b></div>' +
+      '<div class="kv"><span>SL</span><b>'+esc(pos.sl)+'</b></div>' +
+      '<div class="kv"><span>TP</span><b>'+esc(pos.tp)+'</b></div>' +
+      '<div class="pnl '+cls(pos.pnl)+'">'+money(pos.pnl)+'<small>'+esc(rText(pos.r_multiple))+'</small></div>';
+  }
+
+  const hero = data.hero || {};
+  const heroEl = document.getElementById("hero");
+  const hot = hero.kicker === "Next trade check" || hero.kicker === "Checking now";
+  heroEl.className = "hero card" + (hot ? " next" : "");
+  const facts = (hero.facts || []).map(f =>
+    '<div class="fact"><span>'+esc(f.k)+'</span><b>'+esc(f.v)+'</b></div>').join("");
+  heroEl.innerHTML =
+    '<div><div class="kicker">'+esc(hero.kicker || "")+'</div><h1>'+esc(hero.title || "")+'<em>'+esc(hero.ny || "")+'</em></h1></div>' +
+    '<div class="count">'+esc(hero.countdown || "")+'</div>' +
+    (hero.line ? '<div class="line">'+esc(hero.line)+'</div>' : '') +
+    (facts ? '<div class="facts">'+facts+'</div>' : '') +
+    (hero.verdict ? '<div class="verdict">'+esc(hero.verdict)+'</div>' : '');
+
+  const chart = data.chart || {};
+  document.getElementById("chart-head").innerHTML =
+    '<h2>US100.cash · M5</h2>' +
+    '<div class="px">Bid <b>'+esc(chart.bid || "—")+'</b> · Ask <b>'+esc(chart.ask || "—")+'</b> · Spread <b class="'+(chart.spread_wide ? "wide" : "")+'">'+esc(chart.spread || "—")+'</b></div>';
+  draw(chart);
+
+  document.getElementById("windows").innerHTML = (data.windows || []).map(row =>
+    '<tr class="'+esc(row.status)+'"><td><b>'+esc(row.time)+'</b></td><td class="name">'+esc(row.name)+'</td><td><span class="badge '+esc(row.status)+'">'+esc(row.badge)+'</span></td><td class="read">'+esc(row.readout)+'</td></tr>'
+  ).join("");
+
+  const fills = data.fills || [];
+  const box = document.getElementById("fills");
+  box.classList.toggle("hide", !fills.length);
+  document.getElementById("fill-rows").innerHTML = fills.map(row =>
+    '<tr><td>'+esc(row.time)+'</td><td class="side '+esc(row.side)+'">'+esc(row.side.toUpperCase())+'</td><td>'+esc(row.lots)+'</td><td>'+esc(row.price)+'</td><td class="'+cls(row.pnl)+'">'+esc(row.result)+'</td></tr>'
+  ).join("");
 }
 async function tick() {
   try {
-    const data = await (await fetch("/api")).json();
-    render(data);
+    render(await (await fetch("/api")).json());
   } catch (err) {
-    document.getElementById("board").textContent = "Waiting for viewer API...";
+    const heroEl = document.getElementById("hero");
+    heroEl.className = "hero card";
+    heroEl.innerHTML = '<div><div class="kicker">Waiting</div><h1>Viewer offline</h1></div>';
   }
 }
 tick();
@@ -546,75 +662,6 @@ setInterval(tick, 1000);
 </body>
 </html>
 """
-
-
-def decode_log(path):
-    raw = path.read_bytes()
-    if raw.startswith(b"\xff\xfe"):
-        raw = raw[2:]
-    return raw.decode("utf-16-le", errors="replace")
-
-
-def lot_words(volume):
-    number = float(volume)
-    if abs(number - round(number)) < 0.001:
-        return f"{number:.0f} lots"
-    return f"{number:.2f} lots"
-
-
-def plain_trade(text):
-    deal = re.search(r"deal #\d+ (buy|sell) ([\d.]+) \S+ at ([\d.]+) done", text, re.I)
-    if deal:
-        side, volume, price = deal.groups()
-        word = "Bought" if side.lower() == "buy" else "Sold"
-        return word.lower(), f"{word} {lot_words(volume)} at {float(price):.2f}"
-    failed = re.search(
-        r"failed market (buy|sell) ([\d.]+) \S+.*?\[([^\]]+)\]",
-        text,
-        re.I,
-    )
-    if failed:
-        side, volume, reason = failed.groups()
-        word = "Buy" if side.lower() == "buy" else "Sell"
-        if reason.lower() == "trade disabled":
-            return "reject", "Order rejected. Trading was switched off on the old login."
-        why = reason[:1].upper() + reason[1:] + "."
-        return "reject", f"{word} of {lot_words(volume)} was rejected. {why}"
-    moved = re.search(r"-> sl: ([\d.]+), tp: ([\d.]+) done", text, re.I)
-    if moved:
-        stop, target = moved.groups()
-        return "move", f"Stop moved to {float(stop):.2f} (target {float(target):.2f})"
-    return None, None
-
-
-def journal_lines():
-    if not JOURNAL.exists():
-        return []
-    files = sorted(JOURNAL.glob("*.log"))
-    if not files:
-        return []
-    rows = []
-    seen = set()
-    for raw in decode_log(files[-1]).splitlines()[-400:]:
-        parts = raw.split("\t")
-        if len(parts) < 5:
-            continue
-        when = parts[2].split(".")[0]
-        source = parts[3]
-        text = parts[4].strip()
-        kind = ""
-        line = None
-        if source.startswith("Trades"):
-            kind, line = plain_trade(text)
-            if kind == "reject" and "old login" in line:
-                if "old_login" in seen:
-                    continue
-                seen.add("old_login")
-        elif "authorized on" in text.lower():
-            line = "Connected to FTMO server."
-        if line:
-            rows.append({"time": when[:5], "kind": kind, "text": line})
-    return list(reversed(rows[-14:]))
 
 
 def us_dst(day):
@@ -639,27 +686,58 @@ def uk_dst(day):
 
 def ny_now():
     utc = datetime.now(timezone.utc).replace(tzinfo=None)
-    offset = -4 if us_dst(utc) else -5
-    return utc + timedelta(hours=offset)
+    return utc + timedelta(hours=(-4 if us_dst(utc) else -5))
 
 
 def uk_now():
     utc = datetime.now(timezone.utc).replace(tzinfo=None)
-    offset = 1 if uk_dst(utc) else 0
-    return utc + timedelta(hours=offset)
+    return utc + timedelta(hours=(1 if uk_dst(utc) else 0))
+
+
+def london_hhmm(hour, minute, on=None):
+    when = on or ny_now()
+    local = datetime(when.year, when.month, when.day, hour, minute)
+    for ny_offset in (-4, -5):
+        utc = local - timedelta(hours=ny_offset)
+        if us_dst(utc) == (ny_offset == -4):
+            uk_offset = 1 if uk_dst(utc) else 0
+            london = utc + timedelta(hours=uk_offset)
+            return f"{london.hour:02d}:{london.minute:02d}"
+    return f"{(hour + 4) % 24:02d}:{minute:02d}"
+
+
+def london_from_ny(when):
+    return london_hhmm(when.hour, when.minute, when)
 
 
 def bar_ny(bar_time, offset_hours):
-    real_utc = datetime.fromtimestamp(int(bar_time) - offset_hours * 3600, timezone.utc)
-    naive = real_utc.replace(tzinfo=None)
-    ny_offset = -4 if us_dst(naive) else -5
-    return naive + timedelta(hours=ny_offset)
+    real_utc = datetime.fromtimestamp(int(bar_time) - offset_hours * 3600, timezone.utc).replace(tzinfo=None)
+    return real_utc + timedelta(hours=(-4 if us_dst(real_utc) else -5))
 
 
 def server_offset_hours(tick_time):
-    now_utc = datetime.now(timezone.utc).timestamp()
-    delta = float(tick_time) - now_utc
-    return int(round(delta / 3600.0))
+    return int(round((float(tick_time) - datetime.now(timezone.utc).timestamp()) / 3600.0))
+
+
+def clock_left(now, target_minute):
+    left = target_minute * 60 - (now.hour * 3600 + now.minute * 60 + now.second)
+    if left <= 0:
+        return "now"
+    minutes, seconds = divmod(left, 60)
+    if minutes >= 60:
+        hours, minutes = divmod(minutes, 60)
+        return f"{hours}h {minutes:02d}m"
+    if minutes:
+        return f"{minutes}m {seconds:02d}s"
+    return f"{seconds}s"
+
+
+def px(value):
+    return f"{value:,.2f}"
+
+
+def pts(value):
+    return f"{value:+.1f} pts"
 
 
 def chart_bars(symbol, timeframe, count, offset):
@@ -671,6 +749,8 @@ def chart_bars(symbol, timeframe, count, offset):
         when = bar_ny(rate["time"], offset)
         bars.append({
             "t": when.strftime("%H:%M"),
+            "time": int(rate["time"]),
+            "day": when.strftime("%Y-%m-%d"),
             "o": float(rate["open"]),
             "h": float(rate["high"]),
             "l": float(rate["low"]),
@@ -679,442 +759,467 @@ def chart_bars(symbol, timeframe, count, offset):
     return bars
 
 
-def level(price, color, label, dash=False, name=""):
-    row = {"price": float(price), "color": color, "label": label, "dash": dash}
-    if name:
-        row["name"] = name
-    return row
-
-
-def position_levels(position):
-    levels = [level(position.price_open, "#ffffff", f"{float(position.price_open):.2f}", name="Entry")]
-    if position.sl:
-        levels.append(level(position.sl, "#f85149", f"{float(position.sl):.2f}", name="Stop"))
-    if position.tp:
-        levels.append(level(position.tp, "#3fb950", f"{float(position.tp):.2f}", name="Target"))
-    return levels
-
-
-def trade_row(position):
-    buy = position.type == mt5.POSITION_TYPE_BUY
-    current = float(position.price_current)
-    profit = float(position.profit)
-    return {
-        "ticket": int(position.ticket),
-        "symbol": position.symbol,
-        "side": "buy" if buy else "sell",
-        "volume": f"{float(position.volume):.2f}",
-        "price": f"{float(position.price_open):.2f}",
-        "current": f"{current:.2f}",
-        "sl": f"{float(position.sl):.2f}" if position.sl else "—",
-        "tp": f"{float(position.tp):.2f}" if position.tp else "—",
-        "profit": profit,
-        "profit_text": f"{profit:+,.2f}",
-    }
-
-
-def ohlc_line(bar):
-    if not bar:
-        return ""
-    return f"O {bar['o']:.2f}   H {bar['h']:.2f}   L {bar['l']:.2f}   C {bar['c']:.2f}"
-
-
-def day_name(now):
-    return ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")[now.weekday()]
-
-
-def shot_day(now):
-    return now.weekday() in (0, 2, 3, 4)
-
-
-def fade10_day(now):
-    return now.weekday() == 3
-
-
-def mod_fade_day(now):
-    return now.weekday() in (0, 1, 2)
-
-
-def pm_drive_day(now):
-    return now.weekday() in (2, 3, 4)
-
-
-def clock_left(now, target_minute):
-    now_s = now.hour * 3600 + now.minute * 60 + now.second
-    left = target_minute * 60 - now_s
-    if left <= 0:
-        return "now"
-    minutes, seconds = divmod(left, 60)
-    if minutes >= 60:
-        hours, minutes = divmod(minutes, 60)
-        return f"{hours}h {minutes}m"
-    if minutes:
-        return f"{minutes}m {seconds}s"
-    return f"{seconds}s"
-
-
-def bar_closes_in(now, start_minute):
-    now_s = now.hour * 3600 + now.minute * 60 + now.second
-    start_s = start_minute * 60
-    if now_s < start_s or now_s >= start_s + 300:
-        return None
-    return f"{start_s + 300 - now_s}s"
-
-
-def price_text(value):
-    return f"{value:,.2f}"
-
-
-def open_at(bars, hhmm):
+def bar_at(bars, hhmm, day):
     for bar in bars:
-        if bar["t"] == hhmm:
-            return bar["o"]
+        if bar["t"] == hhmm and bar["day"] == day:
+            return bar
     return None
 
 
-def comment_of(position):
-    return (position.comment or "").lower() if position is not None else ""
+def level(price, color, label, dash=False):
+    return {"price": float(price), "color": color, "label": label, "dash": dash}
 
 
-def idea(id_name, name, subtitle, state, side, lead, facts, lines):
-    tone = {
-        "Watching": "watching",
-        "Getting close": "close",
-        "Ready": "ready",
-        "In a trade": "in",
-        "Passed": "passed",
-        "Standing aside": "aside",
-    }[state]
-    return {
-        "id": id_name,
-        "name": name,
-        "subtitle": subtitle,
-        "state": state,
-        "tone": tone,
-        "side": side or "",
-        "lead": lead,
-        "facts": facts,
-        "lines": lines,
+def shot_day(weekday):
+    return weekday in (0, 2, 3, 4)
+
+
+def fade_day(weekday):
+    return weekday in (0, 1, 2)
+
+
+def windows_for(now):
+    return (
+        {"id": "london", "ny": 3 * 60 + 30, "open": 3 * 60, "name": "London fade", "days": set(range(5)), "when": "Mon–Fri"},
+        {"id": "thu", "ny": 10 * 60, "open": 9 * 60 + 30, "name": "Thu snapback", "days": {3}, "when": "Thursday"},
+        {"id": "eleven", "ny": 11 * 60, "open": 9 * 60 + 30, "name": "11:00 check", "days": set(range(5)), "when": "Mon–Fri"},
+        {"id": "pm", "ny": 14 * 60 + 30, "open": 13 * 60, "name": "Afternoon drive", "days": {2, 3, 4}, "when": "Wed–Fri"},
+    )
+
+
+def hhmm(minute):
+    return f"{minute // 60:02d}:{minute % 60:02d}"
+
+
+def burst_of(bars, day, prev_minute, price, move):
+    prev = bar_at(bars, hhmm(prev_minute), day)
+    if prev is None or move == 0:
+        return None
+    return (price - prev["o"]) * (1 if move > 0 else -1)
+
+
+def eleven_verdict(move, burst, weekday, burst_known):
+    side = "BUY" if move > 0 else "SELL"
+    fade_side = "SELL" if move > 0 else "BUY"
+    if abs(move) >= SHOT_POINTS:
+        if not shot_day(weekday):
+            return f"No trade · trend is off today"
+        if not burst_known:
+            return f"{side} trend · 10m not in yet"
+        if burst is not None and burst > 55:
+            return f"No trade · 10m {burst:+.0f} blocks the trend"
+        return f"{side} trend · $1,100"
+    if FALLBACK_MIN <= abs(move) < SHOT_POINTS:
+        if not fade_day(weekday):
+            return "No trade · 10–60 fade is off today"
+        return f"{fade_side} fade · $660"
+    return "No trade · inside 10 pts"
+
+
+def window_rows(now, minutes, bid, bars):
+    day = now.strftime("%Y-%m-%d")
+    weekday = now.weekday()
+    specs = windows_for(now)
+    coming = [s for s in specs if weekday in s["days"] and minutes < s["ny"] + 5]
+    nxt = coming[0]["id"] if coming else None
+    rows = []
+    for spec in specs:
+        london = london_hhmm(spec["ny"] // 60, spec["ny"] % 60, now)
+        on = weekday in spec["days"] and weekday < 5
+        if not on:
+            status, badge, readout = "off", "Off today", spec["when"]
+        elif minutes >= spec["ny"] + 5:
+            status, badge = "done", "Done"
+            readout = done_readout(spec, bars, day, weekday)
+        elif spec["id"] == nxt:
+            status, badge = "next", "Next"
+            readout = next_readout(spec, minutes, bid, bars, day)
+        else:
+            status, badge = "later", "Later"
+            readout = next_readout(spec, minutes, bid, bars, day)
+        rows.append({"time": london, "name": spec["name"], "status": status, "badge": badge, "readout": readout})
+    return rows
+
+
+def move_at(bars, day, open_minute, check_minute, live_price=None):
+    opened = bar_at(bars, hhmm(open_minute), day)
+    if opened is None:
+        return None, None
+    if live_price is None:
+        checked = bar_at(bars, hhmm(check_minute), day)
+        if checked is None:
+            return opened["o"], None
+        return opened["o"], checked["c"] - opened["o"]
+    return opened["o"], live_price - opened["o"]
+
+
+def done_readout(spec, bars, day, weekday):
+    if spec["id"] == "london":
+        _, move = move_at(bars, day, 3 * 60, 3 * 60 + 30)
+        if move is None:
+            return "passed"
+        if LONDON_MIN <= abs(move) < LONDON_MAX:
+            return f"{pts(move)} · fade"
+        return f"{pts(move)} · no trade"
+    if spec["id"] == "thu":
+        _, move = move_at(bars, day, 9 * 60 + 30, 10 * 60)
+        if move is None:
+            return "passed"
+        return f"{pts(move)} · fade" if abs(move) >= SHOT_POINTS else f"{pts(move)} · no trade"
+    if spec["id"] == "eleven":
+        opened, move = move_at(bars, day, 9 * 60 + 30, 11 * 60)
+        if move is None:
+            return "passed"
+        checked = bar_at(bars, "11:00", day)
+        burst = None
+        known = bar_at(bars, "10:55", day) is not None and checked is not None
+        if known:
+            burst = burst_of(bars, day, 10 * 60 + 55, checked["c"], move)
+        return eleven_verdict(move, burst, weekday, known).replace(" · $1,100", "").replace(" · $660", "")
+    _, move = move_at(bars, day, 13 * 60, 14 * 60 + 30)
+    if move is None:
+        return "passed"
+    return f"{pts(move)} · with trend" if abs(move) >= PM_DRIVE_POINTS else f"{pts(move)} · no trade"
+
+
+def next_readout(spec, minutes, bid, bars, day):
+    if minutes < spec["open"]:
+        return f"waits for {london_hhmm(spec['open'] // 60, spec['open'] % 60)} open"
+    opened, move = move_at(bars, day, spec["open"], spec["ny"], bid)
+    if opened is None or move is None:
+        return "waiting for the open bar"
+    return pts(move)
+
+
+def hero_block(now, minutes, bid, bars):
+    weekday = now.weekday()
+    if weekday >= 5:
+        return {
+            "kicker": "Closed",
+            "title": "No checks",
+            "ny": "",
+            "line": "Next is Monday 07:30 London fade",
+            "countdown": "",
+            "facts": [],
+            "verdict": "",
+        }
+    specs = [s for s in windows_for(now) if weekday in s["days"]]
+    nxt = next((s for s in specs if minutes < s["ny"] + 5), None)
+    if nxt is None:
+        tomorrow = now + timedelta(days=1)
+        while tomorrow.weekday() >= 5:
+            tomorrow += timedelta(days=1)
+        first = windows_for(tomorrow)[0]
+        when = london_hhmm(first["ny"] // 60, first["ny"] % 60, tomorrow)
+        return {
+            "kicker": "Done today",
+            "title": "No more checks",
+            "ny": "",
+            "line": f"Next is {tomorrow.strftime('%a')} {when} London {first['name'].lower()}",
+            "countdown": "",
+            "facts": [],
+            "verdict": "",
+        }
+    london = london_hhmm(nxt["ny"] // 60, nxt["ny"] % 60, now)
+    ny = hhmm(nxt["ny"])
+    block = {
+        "kicker": "Checking now" if nxt["ny"] <= minutes < nxt["ny"] + 5 else "Next trade check",
+        "title": f"{london} London",
+        "ny": f"{ny} NY",
+        "line": "",
+        "countdown": clock_left(now, nxt["ny"] if minutes < nxt["ny"] else nxt["ny"] + 5),
+        "facts": [],
+        "verdict": "",
     }
+    if minutes < nxt["open"]:
+        open_london = london_hhmm(nxt["open"] // 60, nxt["open"] % 60, now)
+        block["line"] = f"Waiting for {open_london} London open to set levels"
+        return block
+    day = now.strftime("%Y-%m-%d")
+    opened, move = move_at(bars, day, nxt["open"], nxt["ny"], bid)
+    if opened is None or move is None:
+        block["line"] = "Waiting for the open bar"
+        return block
+    if nxt["id"] == "eleven":
+        block["facts"] = eleven_facts(now, minutes, bid, bars, day, opened, move)
+        known = minutes >= 10 * 60 + 55
+        burst = burst_of(bars, day, 10 * 60 + 55, bid, move) if known else None
+        block["verdict"] = f"If {london} hit now: " + eleven_verdict(move, burst, weekday, known)
+        return block
+    open_london = london_hhmm(nxt["open"] // 60, nxt["open"] % 60, now)
+    block["facts"] = [
+        {"k": f"{open_london} open", "v": px(opened)},
+        {"k": "Price", "v": f"{px(bid)}   {pts(move)}"},
+    ]
+    if nxt["id"] == "london":
+        block["facts"].append({"k": "Fade 5–30", "v": f"BUY ≤ {px(opened - LONDON_MIN)} · SELL ≥ {px(opened + LONDON_MIN)}"})
+        fired = LONDON_MIN <= abs(move) < LONDON_MAX
+        side = "BUY fade" if move < 0 else "SELL fade"
+        block["verdict"] = f"If {london} hit now: {side if fired else 'no trade'}"
+    elif nxt["id"] == "thu":
+        block["facts"].append({"k": "Fade 60+", "v": f"BUY ≤ {px(opened - SHOT_POINTS)} · SELL ≥ {px(opened + SHOT_POINTS)}"})
+        side = "BUY fade" if move < 0 else "SELL fade"
+        block["verdict"] = f"If {london} hit now: {side if abs(move) >= SHOT_POINTS else 'no trade'}"
+    else:
+        block["facts"].append({"k": "Drive 80+", "v": f"BUY ≥ {px(opened + PM_DRIVE_POINTS)} · SELL ≤ {px(opened - PM_DRIVE_POINTS)}"})
+        side = "BUY drive" if move > 0 else "SELL drive"
+        block["verdict"] = f"If {london} hit now: {side if abs(move) >= PM_DRIVE_POINTS else 'no trade'}"
+    return block
 
 
-def trade_facts(position, bid):
-    side = "buy" if position.type == mt5.POSITION_TYPE_BUY else "sell"
-    word = "BUY" if side == "buy" else "SELL"
-    return side, word, [
-        {"label": "Entry", "value": price_text(float(position.price_open))},
-        {"label": "Current", "value": price_text(bid)},
-        {"label": "Stop / TP", "value": f"{float(position.sl):.0f} / {float(position.tp):.0f}"},
-        {"label": "Open P&L", "value": f"${float(position.profit):+,.2f}"},
+def eleven_facts(now, minutes, bid, bars, day, opened, move):
+    fade_hi = opened + SHOT_POINTS
+    fade_lo = opened + FALLBACK_MIN
+    buy_hi = opened - FALLBACK_MIN
+    buy_lo = opened - SHOT_POINTS
+    if minutes < 10 * 60 + 55:
+        burst = f"starts {london_hhmm(10, 55, now)} · max 55"
+    else:
+        value = burst_of(bars, day, 10 * 60 + 55, bid, move)
+        burst = "—" if value is None else f"{value:+.1f} · max 55 for the trend"
+    return [
+        {"k": f"{london_hhmm(9, 30, now)} open", "v": px(opened)},
+        {"k": "Price", "v": f"{px(bid)}   {pts(move)}"},
+        {"k": "Fade 10–60", "v": f"SELL ≥ {px(fade_lo)} and < {px(fade_hi)} · BUY ≤ {px(buy_hi)} and > {px(buy_lo)}"},
+        {"k": "Trend 60+", "v": f"BUY ≥ {px(fade_hi)} · SELL ≤ {px(buy_lo)}"},
+        {"k": "10m", "v": burst},
     ]
 
 
-def london_card(now, minutes, bid, bars, position):
-    sub = "08:30 UK (03:30 NY) · Mon–Fri · $660 Risk"
-    op3 = open_at(bars, "03:00")
-    mv = None if op3 is None else (bid - op3)
-    mv_txt = "—" if mv is None else f"{mv:+.1f} pts"
-
-    if position is not None and "london" in comment_of(position):
-        side, word, facts = trade_facts(position, bid)
-        return idea("london", "1. London Range-Fade", sub, "In a trade", side,
-                    f"{word} {float(position.volume):.2f} lots open.", facts,
-                    ["Stop 15 pts, target 90 pts. Flattens by 14:20 UK (09:20 NY)."])
-    if now.weekday() >= 5:
-        return idea("london", "1. London Range-Fade", sub, "Standing aside", "",
-                    "Weekend — resumes Monday at 08:30 UK.",
-                    [{"label": "Band", "value": "5..30 pts"}, {"label": "Stop / TP", "value": "15 / 90"},
-                     {"label": "Risk", "value": "$660"}, {"label": "Full TP", "value": "+$2,640"}],
-                    ["Fades a 5..30 pt drift from 08:00 to 08:30 UK back toward the London open."])
-    if minutes >= 3 * 60 + 35:
-        return idea("london", "1. London Range-Fade", sub, "Passed", "",
-                    "08:30 UK London window has completed for today.",
-                    [{"label": "08:00 Open", "value": "—" if op3 is None else price_text(op3)},
-                     {"label": "Since 08:00", "value": mv_txt},
-                     {"label": "Band", "value": "5..30 pts"},
-                     {"label": "Status", "value": "Done today"}],
-                    ["Any open London trade closes automatically at 14:20 UK before New York opens."])
-    closes = bar_closes_in(now, 3 * 60 + 30)
-    in_band = mv is not None and LONDON_MIN <= abs(mv) < LONDON_MAX
-    if closes and in_band and position is None:
-        side = "sell" if mv > 0 else "buy"
-        state, lead = "Ready", f"Ready to {side.upper()} (fade) the {mv:+.1f} pt London move."
-    elif in_band and minutes >= 3 * 60:
-        state, side, lead = "Getting close", "", f"Move is {mv:+.1f} pts (inside 5..30 pt fade band)."
-    else:
-        state, side = "Watching", ""
-        lead = "Waiting for 08:00 UK open." if mv is None else f"Move since 08:00 UK: {mv:+.1f} pts (needs 5..30 pts)."
-    return idea("london", "1. London Range-Fade", sub, state, side, lead,
-                [{"label": "Since 08:00 UK", "value": mv_txt}, {"label": "Fade Band", "value": "5..30 pts"},
-                 {"label": "Stop / TP", "value": "15 / 90 pts"},
-                 {"label": "08:30 UK in", "value": closes or clock_left(now, 3 * 60 + 30)}],
-                ["All 5 weekdays: fades a 5..30 pt London open drift ($660 risk, Full TP +$2,640)."])
-
-
-def thu10_card(now, minutes, bid, bars, position):
-    sub = "15:00 UK (10:00 NY) · Thursday Only · $1,100 Risk"
-    op930 = open_at(bars, "09:30")
-    mv = None if op930 is None else (bid - op930)
-    mv_txt = "—" if mv is None else f"{mv:+.1f} pts"
-
-    if position is not None and "day" in comment_of(position) and fade10_day(now) and minutes < 11 * 60:
-        side, word, facts = trade_facts(position, bid)
-        return idea("thu10", "2. Thu 10am Snapback", sub, "In a trade", side,
-                    f"{word} {float(position.volume):.2f} lots open.", facts,
-                    ["Thursday 15:00 UK snapback fade. Stop 20 pts, target 155 pts."])
-    if not fade10_day(now):
-        return idea("thu10", "2. Thu 10am Snapback", sub, "Standing aside", "",
-                    f"Today is {day_name(now)} — this setup only fires on Thursdays.",
-                    [{"label": "Day", "value": "Thursday only"}, {"label": "Trigger", "value": "60+ pts"},
-                     {"label": "Stop / TP", "value": "20 / 155 pts"}, {"label": "Full TP", "value": "+$5,555"}],
-                    ["Fades an exhausted 60+ pt surge in the first 30 mins of NY on Thursdays."])
-    if minutes >= 10 * 60 + 5:
-        return idea("thu10", "2. Thu 10am Snapback", sub, "Passed", "",
-                    "15:00 UK (10:00 NY) window has passed for today.",
-                    [{"label": "Since 14:30 UK", "value": mv_txt}, {"label": "Needed", "value": "60+ pts"},
-                     {"label": "Stop / TP", "value": "20 / 155"}, {"label": "Status", "value": "Done today"}],
-                    ["Next check today is the 16:00 UK (11:00 NY) Big Trend Shot."])
-    closes = bar_closes_in(now, 10 * 60)
-    met = mv is not None and abs(mv) >= SHOT_POINTS
-    if closes and met and position is None:
-        side = "sell" if mv > 0 else "buy"
-        state, lead = "Ready", f"Ready to {side.upper()} (fade) the {mv:+.1f} pt opening spike."
-    elif mv is not None and abs(mv) >= 40.0:
-        state, side, lead = "Getting close", "", f"Move is {mv:+.1f} pts since 14:30 UK (needs 60 pts)."
-    else:
-        state, side = "Watching", ""
-        lead = "Waiting for 14:30 UK NY open." if mv is None else f"Since 14:30 UK: {mv:+.1f} pts (needs 60+ pts)."
-    return idea("thu10", "2. Thu 10am Snapback", sub, state, side, lead,
-                [{"label": "Since 14:30 UK", "value": mv_txt}, {"label": "Needs", "value": "60+ pts"},
-                 {"label": "Stop / TP", "value": "20 / 155 pts"},
-                 {"label": "15:00 UK in", "value": closes or clock_left(now, 10 * 60)}],
-                ["Thursdays at 15:00 UK: fades a 60+ pt 30-minute spike ($1,100 risk, Full TP +$5,555)."])
-
-
-def shot11_card(now, minutes, bid, bars, position):
-    sub = "16:00 UK (11:00 NY) · Mon/Wed/Thu/Fri · $1,100 Risk"
-    op930 = open_at(bars, "09:30")
-    mv = None if op930 is None else (bid - op930)
-    mv_txt = "—" if mv is None else f"{mv:+.1f} pts"
-
-    if position is not None and "day" in comment_of(position) and minutes >= 11 * 60:
-        side, word, facts = trade_facts(position, bid)
-        return idea("shot11", "3. 11am Big Trend Shot", sub, "In a trade", side,
-                    f"{word} {float(position.volume):.2f} lots open.", facts,
-                    ["40% banked at +1R (-0.6R cushion), +4R locks +1.5R, target 155 pts (+$5,555)."])
-    if not shot_day(now):
-        return idea("shot11", "3. 11am Big Trend Shot", sub, "Standing aside", "",
-                    f"Today is {day_name(now)} — Trend Shots run Mon, Wed, Thu, Fri.",
-                    [{"label": "Days", "value": "Mon Wed Thu Fri"}, {"label": "Trigger", "value": "60+ pts"},
-                     {"label": "Stop / TP", "value": "20 / 155 pts"}, {"label": "Full TP", "value": "+$5,555"}],
-                    ["On Tuesday, 16:00 UK only trades the 10..60 pt Range-Fade."])
-    if minutes >= 11 * 60 + 5:
-        return idea("shot11", "3. 11am Big Trend Shot", sub, "Passed", "",
-                    "16:00 UK (11:00 NY) window has completed for today.",
-                    [{"label": "Since 14:30 UK", "value": mv_txt}, {"label": "Needed", "value": "60+ pts"},
-                     {"label": "Stop / TP", "value": "20 / 155"}, {"label": "Status", "value": "Done today"}],
-                    ["Rides 60+ pt morning breakouts in the direction of the trend."])
-    closes = bar_closes_in(now, 11 * 60)
-    met = mv is not None and abs(mv) >= SHOT_POINTS
-    if closes and met and position is None:
-        side = "buy" if mv > 0 else "sell"
-        state, lead = "Ready", f"Ready to {side.upper()} with the {mv:+.1f} pt breakout."
-    elif mv is not None and abs(mv) >= 40.0:
-        state, side, lead = "Getting close", "", f"Move is {mv:+.1f} pts since 14:30 UK (needs 60+ pts)."
-    else:
-        state, side = "Watching", ""
-        lead = "Waiting for 14:30 UK NY open." if mv is None else f"Since 14:30 UK: {mv:+.1f} pts (needs 60+ pts)."
-    return idea("shot11", "3. 11am Big Trend Shot", sub, state, side, lead,
-                [{"label": "Since 14:30 UK", "value": mv_txt}, {"label": "Needs", "value": "60+ pts"},
-                 {"label": "Stop / TP", "value": "20 / 155 pts"},
-                 {"label": "16:00 UK in", "value": closes or clock_left(now, 11 * 60)}],
-                ["Mon/Wed/Thu/Fri at 16:00 UK: rides a 60+ pt breakout ($1,100 risk, Full TP +$5,555)."])
-
-
-def fade11_card(now, minutes, bid, bars, position):
-    sub = "16:00 UK (11:00 NY) · Mon/Tue/Wed · $660 Risk"
-    op930 = open_at(bars, "09:30")
-    mv = None if op930 is None else (bid - op930)
-    mv_txt = "—" if mv is None else f"{mv:+.1f} pts"
-
-    if position is not None and "daily" in comment_of(position) and minutes < 14 * 60 + 30:
-        side, word, facts = trade_facts(position, bid)
-        return idea("fade11", "4. 11am Range-Fade", sub, "In a trade", side,
-                    f"{word} {float(position.volume):.2f} lots open.", facts,
-                    ["Mon/Tue/Wed 10..60 pt range-fade. Stop 20 pts, target 120 pts (+$2,640)."])
-    if not mod_fade_day(now):
-        return idea("fade11", "4. 11am Range-Fade", sub, "Standing aside", "",
-                    f"Today is {day_name(now)} — 11am Range-Fade runs Mon/Tue/Wed only.",
-                    [{"label": "Days", "value": "Mon Tue Wed"}, {"label": "Band", "value": "10..60 pts"},
-                     {"label": "Stop / TP", "value": "20 / 120 pts"}, {"label": "Full TP", "value": "+$2,640"}],
-                    ["Skipped on Thu/Fri because Thu/Fri mornings trend into the afternoon."])
-    if minutes >= 11 * 60 + 5:
-        return idea("fade11", "4. 11am Range-Fade", sub, "Passed", "",
-                    "16:00 UK (11:00 NY) window has completed for today.",
-                    [{"label": "Since 14:30 UK", "value": mv_txt}, {"label": "Band", "value": "10..60 pts"},
-                     {"label": "Stop / TP", "value": "20 / 120"}, {"label": "Status", "value": "Done today"}],
-                    ["Fades moderate 10..60 pt morning moves back toward the 14:30 UK open."])
-    closes = bar_closes_in(now, 11 * 60)
-    in_band = mv is not None and FALLBACK_MIN <= abs(mv) < SHOT_POINTS
-    if closes and in_band and position is None:
-        side = "sell" if mv > 0 else "buy"
-        state, lead = "Ready", f"Ready to {side.upper()} (fade) the {mv:+.1f} pt range move."
-    elif in_band and minutes >= 10 * 60 + 30:
-        state, side, lead = "Getting close", "", f"Move is {mv:+.1f} pts (inside 10..60 pt fade band)."
-    else:
-        state, side = "Watching", ""
-        lead = "Waiting for 14:30 UK NY open." if mv is None else f"Since 14:30 UK: {mv:+.1f} pts (band is 10..60 pts)."
-    return idea("fade11", "4. 11am Range-Fade", sub, state, side, lead,
-                [{"label": "Since 14:30 UK", "value": mv_txt}, {"label": "Fade Band", "value": "10..60 pts"},
-                 {"label": "Stop / TP", "value": "20 / 120 pts"},
-                 {"label": "16:00 UK in", "value": closes or clock_left(now, 11 * 60)}],
-                ["Mon/Tue/Wed at 16:00 UK: fades a 10..60 pt morning drift ($660 risk, Full TP +$2,640)."])
-
-
-def pm1430_card(now, minutes, bid, bars, position):
-    sub = "19:30 UK (14:30 NY) · Wed/Thu/Fri · $660 Risk"
-    op13 = open_at(bars, "13:00")
-    mv = None if op13 is None else (bid - op13)
-    mv_txt = "—" if mv is None else f"{mv:+.1f} pts"
-
-    if position is not None and "daily" in comment_of(position) and minutes >= 14 * 60 + 30:
-        side, word, facts = trade_facts(position, bid)
-        return idea("pm1430", "5. 14:30 PM Drive", sub, "In a trade", side,
-                    f"{word} {float(position.volume):.2f} lots open.", facts,
-                    ["Afternoon power-hour continuation. Stop 20 pts, target 100 pts (+$2,244)."])
-    if not pm_drive_day(now):
-        return idea("pm1430", "5. 14:30 PM Drive", sub, "Standing aside", "",
-                    f"Today is {day_name(now)} — Afternoon Drive runs Wed, Thu, Fri.",
-                    [{"label": "Days", "value": "Wed Thu Fri"}, {"label": "Trigger", "value": "80+ pts"},
-                     {"label": "Stop / TP", "value": "20 / 100 pts"}, {"label": "Full TP", "value": "+$2,244"}],
-                    ["Rides strong 80+ pt afternoon trends from 18:00 UK into the 20:55 UK close."])
-    if minutes >= 14 * 60 + 35:
-        return idea("pm1430", "5. 14:30 PM Drive", sub, "Passed", "",
-                    "19:30 UK (14:30 NY) window has completed for today.",
-                    [{"label": "Since 18:00 UK", "value": mv_txt}, {"label": "Needed", "value": "80+ pts"},
-                     {"label": "Stop / TP", "value": "20 / 100"}, {"label": "Status", "value": "Done today"}],
-                    ["All open trades flatten at 20:55 UK (15:55 NY)."])
-    closes = bar_closes_in(now, 14 * 60 + 30)
-    met = mv is not None and abs(mv) >= PM_DRIVE_POINTS
-    if closes and met and position is None:
-        side = "buy" if mv > 0 else "sell"
-        state, lead = "Ready", f"Ready to {side.upper()} the {mv:+.1f} pt afternoon drive."
-    elif mv is not None and abs(mv) >= 55.0:
-        state, side, lead = "Getting close", "", f"Move since 18:00 UK is {mv:+.1f} pts (needs 80+ pts)."
-    else:
-        state, side = "Watching", ""
-        lead = "Waiting for 18:00 UK (13:00 NY) open." if mv is None else f"Since 18:00 UK: {mv:+.1f} pts (needs 80+ pts)."
-    return idea("pm1430", "5. 14:30 PM Drive", sub, state, side, lead,
-                [{"label": "Since 18:00 UK", "value": mv_txt}, {"label": "Needs", "value": "80+ pts"},
-                 {"label": "Stop / TP", "value": "20 / 100 pts"},
-                 {"label": "19:30 UK in", "value": closes or clock_left(now, 14 * 60 + 30)}],
-                ["Wed/Thu/Fri at 19:30 UK: rides an 80+ pt drive since 18:00 UK if flat ($660 risk)."])
-
-
-def board_summary(now, uk, ideas, position):
-    if position is not None:
-        side = "BUY" if position.type == mt5.POSITION_TYPE_BUY else "SELL"
-        return f"ACTIVE TRADE: {side} {float(position.volume):.2f} lots on US100.cash at {float(position.price_open):.2f} (Open P&L: ${float(position.profit):+,.2f})"
-    active = [c for c in ideas if c["state"] in ("Ready", "Getting close", "Watching")]
-    if active:
-        nxt = active[0]
-        return f"{day_name(now)} · Next Active Setup: {nxt['name']} ({nxt['subtitle']}) — {nxt['lead']}"
-    return f"{day_name(now)} · All trading windows for today have completed. Next window: Tomorrow 08:30 UK London Open Fade."
-
-
-def nas_view(now, minutes, bid, ask, spread_pts, bars, position):
-    open0300 = open_at(bars, "03:00")
-    open930 = open_at(bars, "09:30")
-    open1300 = open_at(bars, "13:00")
+def chart_levels(now, minutes, bars, bid, position):
+    day = now.strftime("%Y-%m-%d")
     levels = []
-    if open0300 is not None and minutes < 9 * 60 + 30:
-        levels.append(level(open0300, "#58a6ff", f"{open0300:.2f}", name="08:00 UK London Open"))
-    if open930 is not None:
-        levels.append(level(open930, "#e3b341", f"{open930:.2f}", name="14:30 UK (09:30 NY) Open"))
-        levels.append(level(open930 + SHOT_POINTS, "#8b949e", f"{open930 + SHOT_POINTS:.2f}", True, "+60 Shot"))
-        levels.append(level(open930 - SHOT_POINTS, "#8b949e", f"{open930 - SHOT_POINTS:.2f}", True, "-60 Shot"))
-    if open1300 is not None and minutes >= 13 * 60:
-        levels.append(level(open1300, "#a371f7", f"{open1300:.2f}", True, "18:00 UK (13:00 NY) Open"))
-    if position is not None:
-        levels = position_levels(position) + levels
-    last = bars[-1] if bars else None
+    # An open position is drawn as the green/red position box, not as extra lines.
+    # Only the window that is still ahead. A finished open (the 07:30 London
+    # fade, once 07:35 has passed) stays off the chart until the next window's
+    # own reference bar exists.
+    specs = [s for s in windows_for(now) if now.weekday() in s["days"]]
+    nxt = next((s for s in specs if minutes < s["ny"] + 5), None)
+    if nxt is None or minutes < nxt["open"]:
+        return levels
+    opened = bar_at(bars, hhmm(nxt["open"]), day)
+    if opened is None:
+        return levels
+    price = opened["o"]
+    if nxt["id"] == "london":
+        levels += [
+            level(price, "#e3b341", px(price)),
+            level(price + LONDON_MIN, "#8b949e", f"+{LONDON_MIN:.0f}", True),
+            level(price - LONDON_MIN, "#8b949e", f"-{LONDON_MIN:.0f}", True),
+            level(price + LONDON_MAX, "#58a6ff", f"+{LONDON_MAX:.0f}", True),
+            level(price - LONDON_MAX, "#58a6ff", f"-{LONDON_MAX:.0f}", True),
+        ]
+    elif nxt["id"] == "thu":
+        levels += [
+            level(price, "#e3b341", px(price)),
+            level(price + SHOT_POINTS, "#58a6ff", "+60", True),
+            level(price - SHOT_POINTS, "#58a6ff", "-60", True),
+        ]
+    elif nxt["id"] == "eleven":
+        levels += [
+            level(price, "#e3b341", px(price)),
+            level(price + FALLBACK_MIN, "#8b949e", "+10", True),
+            level(price - FALLBACK_MIN, "#8b949e", "-10", True),
+            level(price + SHOT_POINTS, "#58a6ff", "+60", True),
+            level(price - SHOT_POINTS, "#58a6ff", "-60", True),
+        ]
+    else:
+        levels += [
+            level(price, "#d2a8ff", px(price)),
+            level(price + PM_DRIVE_POINTS, "#d2a8ff", "+80", True),
+            level(price - PM_DRIVE_POINTS, "#d2a8ff", "-80", True),
+        ]
+    return levels
+
+
+def opening_stop_points(position, entry, direction, sl, partial_taken):
+    """Original stop distance. The opening order keeps the first SL after the stop is moved."""
+    ticket = int(getattr(position, "identifier", 0) or position.ticket)
+    opened = int(position.time)
+    open_type = mt5.ORDER_TYPE_BUY if direction > 0 else mt5.ORDER_TYPE_SELL
+    orders = mt5.history_orders_get(opened - 300, opened + 8 * 86400) or []
+    best = None
+    for order in orders:
+        if int(getattr(order, "position_id", 0) or 0) != ticket:
+            continue
+        if int(order.type) != open_type:
+            continue
+        order_sl = float(order.sl or 0.0)
+        if order_sl <= 0.0 or (entry - order_sl) * direction <= 0.0:
+            continue
+        dist = abs(entry - order_sl)
+        if dist < 1.0:
+            continue
+        when = int(getattr(order, "time_setup", 0) or getattr(order, "time_done", 0) or 0)
+        if best is None or when < best[0]:
+            best = (when, dist)
+    if best is not None:
+        return best[1]
+    if sl is not None and not partial_taken and (entry - sl) * direction > 0.0:
+        dist = abs(entry - sl)
+        if dist >= 1.0:
+            return dist
+    if sl is not None and partial_taken:
+        signed = (sl - entry) * direction
+        if signed < -1.0:
+            return abs(signed) / 0.70
+        if signed > 1.0:
+            return signed / 1.50
+    return 20.0
+
+
+def position_view(position, bid, ask):
+    if position is None:
+        return None
+    buy = position.type == mt5.POSITION_TYPE_BUY
+    entry = float(position.price_open)
+    sl = float(position.sl) if position.sl else None
+    tp = float(position.tp) if position.tp else None
+    volume = float(position.volume)
+    direction = 1.0 if buy else -1.0
+    mark = float(bid if buy else ask)
+    pnl = float(position.profit) + float(position.swap)
+    info = mt5.symbol_info(position.symbol)
+    tick_size = float(info.trade_tick_size) if info and info.trade_tick_size else 0.0
+    tick_value = float(info.trade_tick_value) if info and info.trade_tick_value else 0.0
+
+    def cash(points):
+        if tick_size <= 0.0 or tick_value <= 0.0:
+            return None
+        return points / tick_size * tick_value * volume
+
+    partial_taken = False
+    opened = int(position.time)
+    deals = mt5.history_deals_get(opened - 60, opened + 8 * 86400) or []
+    ticket = int(getattr(position, "identifier", 0) or position.ticket)
+    for deal in deals:
+        if int(getattr(deal, "position_id", 0)) == ticket and int(deal.entry) == 1:
+            partial_taken = True
+            break
+    r_pts = round(opening_stop_points(position, entry, direction, sl, partial_taken), 2)
+    initial_sl = entry - direction * r_pts
+    partial = entry + direction * r_pts * 0.75
+    lock4 = entry + direction * r_pts * 4.0
+    r_multiple = ((mark - entry) * direction) / r_pts
+    locked_pts = ((sl - entry) * direction) if sl is not None else -r_pts
     return {
-        "id": "nas",
-        "title": "US100.cash · M5 Live Chart",
-        "bid": f"{bid:,.2f}",
-        "ask": f"{ask:,.2f}",
-        "spread": f"{spread_pts:.1f} pts",
-        "bars": bars[-84:],
-        "levels": levels,
-        "note": "US100.cash, M5\n" + ohlc_line(last),
+        "symbol": position.symbol,
+        "side": "BUY" if buy else "SELL",
+        "volume": f"{volume:.2f}",
+        "entry": px(entry),
+        "entry_time": opened,
+        "sl": px(sl) if sl is not None else "—",
+        "tp": px(tp) if tp is not None else "—",
+        "initial_sl": px(initial_sl),
+        "r_pts": r_pts,
+        "partial": px(partial),
+        "partial_taken": partial_taken,
+        "lock4": px(lock4),
+        "price": px(mark),
+        "pnl": pnl,
+        "r_multiple": round(r_multiple, 2),
+        "risk_dollars": cash(-r_pts),
+        "target_dollars": None if tp is None else cash(abs(tp - entry)),
+        "locked_dollars": cash(locked_pts),
     }
+
+
+def todays_fills(now, offset, tick_time):
+    server_now = datetime.fromtimestamp(int(tick_time), timezone.utc).replace(tzinfo=None)
+    deals = mt5.history_deals_get(server_now - timedelta(days=3), server_now + timedelta(hours=1)) or []
+    rows = []
+    closed = 0.0
+    for deal in deals:
+        if deal.symbol != SYMBOL or deal.type not in (0, 1):
+            continue
+        when = bar_ny(deal.time, offset)
+        if when.date() != now.date():
+            continue
+        profit = float(deal.profit) + float(deal.commission) + float(deal.swap)
+        closed += profit
+        result = "in" if deal.entry == 0 else money_text(profit)
+        rows.append({
+            "time": london_from_ny(when),
+            "side": "buy" if deal.type == 0 else "sell",
+            "lots": f"{float(deal.volume):.2f}",
+            "price": px(deal.price),
+            "pnl": profit,
+            "result": result,
+            "sort": int(deal.time),
+        })
+    rows.sort(key=lambda row: row["sort"])
+    for row in rows:
+        row.pop("sort", None)
+    return rows, closed
+
+
+def money_text(value):
+    sign = "+" if value > 0 else ""
+    return f"{sign}${value:,.2f}"
 
 
 def blank_snapshot(message):
     return {
-        "uk_clock": "--:--:--",
-        "ny_clock": "--:--:--",
-        "metrics": [],
-        "charts": [{"id": "nas", "title": "US100.cash · M5", "bars": [], "levels": [], "bid": "-", "ask": "-", "spread": "-", "note": message}],
-        "board": message,
-        "thinking": [],
-        "trades": [],
-        "journal": journal_lines(),
+        "london": "--:--:--",
+        "ny": "--:--:--",
+        "balance": None,
+        "equity": None,
+        "day_pnl": None,
+        "trading": "LOCKED",
+        "position": None,
+        "hero": {"kicker": "Waiting", "title": message, "ny": "", "line": "", "countdown": "", "facts": [], "verdict": ""},
+        "chart": {"bars": [], "levels": [], "bid": "—", "ask": "—", "spread": "—", "spread_wide": False},
+        "windows": [],
+        "fills": [],
     }
 
 
 def snapshot_now():
     if mt5.terminal_info() is None and not mt5.initialize(timeout=1500):
-        return blank_snapshot("MetaTrader 5 is waiting for connection...")
+        return blank_snapshot("MetaTrader is not connected")
+    term = mt5.terminal_info()
     tick = mt5.symbol_info_tick(SYMBOL)
     info = mt5.account_info()
     if tick is None:
-        return blank_snapshot("Waiting for US100.cash quotes...")
+        return blank_snapshot("Waiting for US100.cash")
     offset = server_offset_hours(tick.time)
     now = ny_now()
     uk = uk_now()
     minutes = now.hour * 60 + now.minute
     bid = float(tick.bid)
     ask = float(tick.ask)
-    spread_pts = ask - bid
-    bars = chart_bars(SYMBOL, mt5.TIMEFRAME_M5, 180, offset)
-    nas_positions = [p for p in (mt5.positions_get(symbol=SYMBOL) or []) if p.magic == MAGIC]
-    trading = bool(info.trade_allowed) if info is not None else False
-    nas_position = nas_positions[0] if nas_positions else None
-
-    nas = nas_view(now, minutes, bid, ask, spread_pts, bars, nas_position)
-    ideas = [
-        london_card(now, minutes, bid, bars, nas_position),
-        thu10_card(now, minutes, bid, bars, nas_position),
-        shot11_card(now, minutes, bid, bars, nas_position),
-        fade11_card(now, minutes, bid, bars, nas_position),
-        pm1430_card(now, minutes, bid, bars, nas_position),
-    ]
-
-    balance = float(info.balance) if info is not None else 100000.0
-    equity = float(info.equity) if info is not None else balance
-    open_pnl = equity - balance
-    floor_room = equity - 90000.0
-    target_room = 110000.0 - equity
-
-    metrics = [
-        {"label": "Account Balance", "value": f"${balance:,.2f}", "sub": info.name if info else "FTMO $100k", "cls": ""},
-        {"label": "Live Equity", "value": f"${equity:,.2f}", "sub": f"Open P&L: ${open_pnl:+,.2f}", "cls": "good" if open_pnl >= 0 else "bad"},
-        {"label": "FTMO $90k Floor Cushion", "value": f"${floor_room:,.2f}", "sub": "Hard floor: $90,000 (Bot stops at $91k)", "cls": "good" if floor_room >= 5000 else "warn"},
-        {"label": "Daily Loss Limit", "value": "$4,200 Cap", "sub": "FTMO Max Daily Loss: $5,000", "cls": ""},
-        {"label": "2-Stage Smart Runner", "value": "40% @ +1R", "sub": "Stop -> -0.60R (+$44/$26 min) · +4R -> +1.5R", "cls": "good"},
-        {"label": "Execution Status", "value": "TRADING LIVE" if trading else "DISABLED", "sub": f"Magic {MAGIC} · US100.cash Only", "cls": "good" if trading else "bad"},
-    ]
-
+    spread = ask - bid
+    bars = chart_bars(SYMBOL, mt5.TIMEFRAME_M5, 220, offset)
+    positions = [p for p in (mt5.positions_get(symbol=SYMBOL) or []) if p.magic == MAGIC]
+    position = positions[0] if positions else None
+    live = bool(term and term.connected and term.trade_allowed and info and info.trade_allowed and info.trade_expert)
+    balance = float(info.balance) if info is not None else None
+    equity = float(info.equity) if info is not None else None
+    fills, closed = todays_fills(now, offset, tick.time)
+    floating = sum(float(p.profit) for p in positions)
+    today = bars[-1]["day"] if bars else ""
+    session = [b for b in bars if b["day"] == today]
+    held = position_view(position, bid, ask)
     return {
-        "uk_clock": f"{uk.strftime('%a %H:%M:%S')} UK",
-        "ny_clock": f"{now.strftime('%H:%M:%S')} NY",
-        "metrics": metrics,
-        "board": board_summary(now, uk, ideas, nas_position),
-        "charts": [nas],
-        "thinking": ideas,
-        "trades": [trade_row(p) for p in nas_positions],
-        "journal": journal_lines(),
+        "london": uk.strftime("%H:%M:%S"),
+        "ny": now.strftime("%H:%M:%S"),
+        "balance": balance,
+        "equity": equity,
+        "day_pnl": None if balance is None else closed + floating,
+        "trading": "LIVE" if live else "LOCKED",
+        "position": held,
+        "hero": hero_block(now, minutes, bid, bars),
+        "chart": {
+            "bars": session[-96:] or bars[-96:],
+            "levels": chart_levels(now, minutes, bars, bid, position),
+            "position": held,
+            "bid": px(bid),
+            "ask": px(ask),
+            "spread": f"{spread:.2f}",
+            "spread_wide": spread > SPREAD_CAP,
+        },
+        "windows": window_rows(now, minutes, bid, bars),
+        "fills": fills,
     }
 
 
@@ -1127,7 +1232,7 @@ def snapshot():
     global _snapshot_busy, _last_snapshot
     with _snapshot_lock:
         if _snapshot_busy:
-            return _last_snapshot or blank_snapshot("MetaTrader is refreshing...")
+            return _last_snapshot or blank_snapshot("MetaTrader is refreshing")
         _snapshot_busy = True
     box = {}
 
@@ -1145,26 +1250,282 @@ def snapshot():
     thread.start()
     thread.join(2.0)
     if thread.is_alive():
-        return _last_snapshot or blank_snapshot("MetaTrader is refreshing...")
+        return _last_snapshot or blank_snapshot("MetaTrader is refreshing")
     if box.get("error"):
         return blank_snapshot("MetaTrader is not connected")
     value = box.get("value") or blank_snapshot("MetaTrader is not connected")
-    charts = value.get("charts") or []
-    if charts and charts[0].get("bars"):
+    if value.get("chart", {}).get("bars"):
         _last_snapshot = value
     return value
 
 
+ROOT = Path(__file__).resolve().parent
+SETUP_FILES = {
+    "/RobustForexEA.ex5": ROOT / "MQL5" / "Experts" / "RobustForexEA.ex5",
+    "/RobustForexEA.mq5": ROOT / "MQL5" / "Experts" / "RobustForexEA.mq5",
+    "/RobustForexEA.set": ROOT / "MQL5" / "Profiles" / "Tester" / "RobustForexEA.set",
+    "/Include/RobustForex/Strategy.mqh": ROOT / "MQL5" / "Include" / "RobustForex" / "Strategy.mqh",
+    "/Include/RobustForex/OpeningRange.mqh": ROOT / "MQL5" / "Include" / "RobustForex" / "OpeningRange.mqh",
+    "/Include/RobustForex/RiskManager.mqh": ROOT / "MQL5" / "Include" / "RobustForex" / "RiskManager.mqh",
+    "/Include/RobustForex/TradeManager.mqh": ROOT / "MQL5" / "Include" / "RobustForex" / "TradeManager.mqh",
+}
+
+SETUP_PS1 = r"""# Install RobustForexEA v6.50 into every MT5 data folder on this PC.
+# Does not stop terminal64.exe and does not change the account login.
+$ErrorActionPreference = "Stop"
+$base = "__BASE__"
+$work = Join-Path $env:TEMP "mt5bot-setup"
+New-Item -ItemType Directory -Force -Path $work | Out-Null
+$ProgressPreference = "SilentlyContinue"
+$downloads = @(
+    @{ Url = "RobustForexEA.mq5"; Out = "RobustForexEA.mq5" },
+    @{ Url = "RobustForexEA.ex5"; Out = "RobustForexEA.ex5" },
+    @{ Url = "RobustForexEA.set"; Out = "RobustForexEA.set" },
+    @{ Url = "Include/RobustForex/Strategy.mqh"; Out = "Include\RobustForex\Strategy.mqh" },
+    @{ Url = "Include/RobustForex/OpeningRange.mqh"; Out = "Include\RobustForex\OpeningRange.mqh" },
+    @{ Url = "Include/RobustForex/RiskManager.mqh"; Out = "Include\RobustForex\RiskManager.mqh" },
+    @{ Url = "Include/RobustForex/TradeManager.mqh"; Out = "Include\RobustForex\TradeManager.mqh" }
+)
+foreach ($item in $downloads) {
+    $out = Join-Path $work $item.Out
+    $dir = Split-Path $out
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+    Invoke-WebRequest -Uri "$base/$($item.Url)" -OutFile $out -UseBasicParsing
+    if ((Get-Item $out).Length -lt 32) { throw "Download of $($item.Url) from $base looks empty." }
+}
+$srcExpert = Join-Path $work "RobustForexEA.mq5"
+$srcEx5 = Join-Path $work "RobustForexEA.ex5"
+$srcSet = Join-Path $work "RobustForexEA.set"
+
+$fromUnix = [DateTimeOffset]::new(2026, 1, 1, 0, 0, 0, [TimeSpan]::Zero).ToUnixTimeSeconds()
+$toUnix = [DateTimeOffset]::new(2026, 10, 26, 0, 0, 0, [TimeSpan]::Zero).ToUnixTimeSeconds()
+
+function Read-MtText([string]$Path) {
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    $utf16 = ($bytes.Length -ge 2 -and $bytes[0] -eq 255 -and $bytes[1] -eq 254)
+    if ($utf16) {
+        return @{ Text = [Text.Encoding]::Unicode.GetString($bytes); Utf16 = $true }
+    }
+    return @{ Text = [Text.Encoding]::UTF8.GetString($bytes); Utf16 = $false }
+}
+
+function Write-MtText([string]$Path, [string]$Text, [bool]$Utf16) {
+    $enc = if ($Utf16) { [Text.Encoding]::Unicode } else { New-Object System.Text.UTF8Encoding $false }
+    $payload = $enc.GetBytes($Text)
+    if ($Utf16) { $payload = $enc.GetPreamble() + $payload }
+    [IO.File]::WriteAllBytes($Path, $payload)
+}
+
+function Update-IniSection([string]$Path, [string]$Section, [object[]]$Pairs) {
+    $dir = Split-Path $Path
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
+    $utf16 = $false
+    $newline = "`r`n"
+    $lines = @()
+    if (Test-Path $Path) {
+        $read = Read-MtText $Path
+        $utf16 = $read.Utf16
+        if ($read.Text.Contains("`r`n")) { $newline = "`r`n" } else { $newline = "`n" }
+        $lines = [regex]::Split($read.Text, "`r?`n")
+    }
+    $map = [ordered]@{}
+    foreach ($pair in $Pairs) { $map[$pair[0]] = $pair[1] }
+    $out = New-Object System.Collections.Generic.List[string]
+    $inSection = $false
+    $seen = @{}
+    $found = $false
+    foreach ($line in $lines) {
+        if ($line -match '^\[(.+)\]\s*$') {
+            if ($inSection) {
+                foreach ($key in $map.Keys) {
+                    if (-not $seen.ContainsKey($key)) { $out.Add("$key=$($map[$key])") }
+                }
+                $inSection = $false
+            }
+            $found = $found -or ($Matches[1] -eq $Section)
+            $inSection = ($Matches[1] -eq $Section)
+            $out.Add($line)
+            continue
+        }
+        if ($inSection -and $line -match '^([^=]+)=(.*)$') {
+            $key = $Matches[1].Trim()
+            $hit = $null
+            foreach ($name in $map.Keys) {
+                if ($name -eq $key) { $hit = $name; break }
+            }
+            if ($hit) {
+                $out.Add("$hit=$($map[$hit])")
+                $seen[$hit] = $true
+                continue
+            }
+        }
+        $out.Add($line)
+    }
+    if ($inSection) {
+        foreach ($key in $map.Keys) {
+            if (-not $seen.ContainsKey($key)) { $out.Add("$key=$($map[$key])") }
+        }
+    } elseif (-not $found) {
+        if ($out.Count -gt 0 -and $out[$out.Count - 1] -ne "") { $out.Add("") }
+        $out.Add("[$Section]")
+        foreach ($key in $map.Keys) { $out.Add("$key=$($map[$key])") }
+    }
+    Write-MtText $Path (($out -join $newline).TrimEnd() + $newline) $utf16
+}
+
+$terminalRoot = Join-Path $env:APPDATA "MetaQuotes\Terminal"
+$folders = @()
+if (Test-Path $terminalRoot) {
+    $folders = @(Get-ChildItem $terminalRoot -Directory | Where-Object { $_.Name -match '^[0-9A-Fa-f]{32}$' })
+}
+if ($folders.Count -eq 0) {
+    Write-Output "No MT5 data folder under $terminalRoot."
+    Write-Output "Open MetaTrader 5 once so it creates a data folder, close it, then run this again."
+    exit 1
+}
+
+$running = Get-Process terminal64 -ErrorAction SilentlyContinue
+if ($running) {
+    Write-Output "MetaTrader is open. Files will be copied, but a running terminal ignores them until you close it and open it again."
+    Write-Output "This script will not close MetaTrader."
+}
+
+$setText = (Read-MtText $srcSet).Text
+$inputLines = @()
+$keep = $false
+foreach ($line in ([regex]::Split($setText, "`r?`n"))) {
+    if ($line -match '^; Model' -or $line -match '^Inp') { $keep = $true }
+    if ($keep -and $line.Trim() -ne "") { $inputLines += $line }
+}
+$profile = @(
+    ";Expert Advisor single test: RobustForexEA, US100.cash M5, real ticks, 2026.01.01 - 2026.10.26"
+    "[Tester]"
+    "Expert=RobustForexEA.ex5"
+    "Symbol=US100.cash"
+    "Period=M5"
+    "Optimization=0"
+    "Model=4"
+    "FromDate=2026.01.01"
+    "ToDate=2026.10.26"
+    "ForwardMode=0"
+    "Deposit=100000"
+    "Currency=USD"
+    "ProfitInPips=0"
+    "Leverage=100"
+    "ExecutionMode=0"
+    "OptimizationCriterion=0"
+    "Visual=0"
+    "[TesterInputs]"
+) + $inputLines
+
+$dialogKeys = @(
+    @("LastExpert", "Experts\RobustForexEA.ex5"),
+    @("Expert", "Experts\RobustForexEA.ex5"),
+    @("Symbol", "US100.cash"),
+    @("Period", "5"),
+    @("DateRange", "3"),
+    @("DateFrom", "$fromUnix"),
+    @("DateTo", "$toUnix"),
+    @("Deposit", "100000.00"),
+    @("Currency", "USD"),
+    @("Model", "4")
+)
+$commonKeys = @(
+    @("Expert", "RobustForexEA.ex5"),
+    @("Symbol", "US100.cash"),
+    @("Period", "M5"),
+    @("FromDate", "2026.01.01"),
+    @("ToDate", "2026.10.26")
+)
+
+foreach ($folder in $folders) {
+    Write-Output "Updating $($folder.FullName)"
+    $experts = Join-Path $folder.FullName "MQL5\Experts"
+    $tester = Join-Path $folder.FullName "MQL5\Profiles\Tester"
+    New-Item -ItemType Directory -Force -Path $experts, $tester | Out-Null
+    Copy-Item $srcExpert (Join-Path $experts "RobustForexEA.mq5") -Force
+    Copy-Item $srcEx5 (Join-Path $experts "RobustForexEA.ex5") -Force
+    Copy-Item $srcSet (Join-Path $tester "RobustForexEA.set") -Force
+    $includeDest = Join-Path $folder.FullName "MQL5\Include\RobustForex"
+    New-Item -ItemType Directory -Force -Path $includeDest | Out-Null
+    Copy-Item (Join-Path $work "Include\RobustForex\*.mqh") $includeDest -Force
+    $iniName = "RobustForexEA.US100.cash.M5.20260101_20261026.400.ini"
+    Write-MtText (Join-Path $tester $iniName) (($profile -join "`r`n") + "`r`n") $false
+    Update-IniSection (Join-Path $folder.FullName "config\terminal.ini") "Tester" $dialogKeys
+    Update-IniSection (Join-Path $folder.FullName "config\common.ini") "Tester" $commonKeys
+}
+
+Write-Output ""
+Write-Output "Strategy Tester is set to RobustForexEA.ex5, US100.cash, M5, real ticks, 2026.01.01-2026.10.26, v6.50 inputs."
+Write-Output "The 15:00 London (11:00 NY) trend shot uses a 50-point stop. Thursday's 14:00 snapback stays at 20 points."
+Write-Output "A full 2026 M5 test is about 57,000 bars. About 11,000 bars means the period was not M5, and this book then takes 0 trades."
+Write-Output "Close MetaTrader if it is open, then start it again and open View -> Strategy Tester. Leave the period on M5."
+"""
+
+
+def public_base(handler):
+    host = (handler.headers.get("Host") or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9.\-:]+", host):
+        host = "127.0.0.1:8765"
+    forwarded = (handler.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
+    if forwarded in ("http", "https"):
+        proto = forwarded
+    elif host.startswith("127.0.0.1") or host.startswith("localhost"):
+        proto = "http"
+    else:
+        proto = "https"
+    return f"{proto}://{host}"
+
+
+def send_body(handler, body, content_type):
+    handler.send_response(200)
+    handler.send_header("Content-Type", content_type)
+    handler.send_header("Content-Length", str(len(body)))
+    handler.send_header("Cache-Control", "no-store")
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path.startswith("/api"):
-            body = json.dumps(snapshot()).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(body)
+        path = urlparse(self.path).path
+        if path == "/api" or path.startswith("/api/"):
+            send_body(self, json.dumps(snapshot()).encode("utf-8"), "application/json")
             return
+        if path == "/setup.ps1":
+            script = SETUP_PS1.replace("__BASE__", public_base(self))
+            send_body(self, script.encode("utf-8"), "text/plain; charset=utf-8")
+            return
+        setup_path = SETUP_FILES.get(path)
+        if setup_path is not None:
+            if not setup_path.is_file():
+                self.send_response(404)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(b"missing\n")
+                return
+            send_body(self, setup_path.read_bytes(), "application/octet-stream")
+            return
+        if self.path.startswith("/report.pdf"):
+            pdf_path = Path(__file__).with_name("US100_2026_Backtest_Report.pdf")
+            if pdf_path.exists():
+                body = pdf_path.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/pdf")
+                self.send_header("Content-Disposition", 'inline; filename="US100_2026_Backtest_Report.pdf"')
+                self.end_headers()
+                self.wfile.write(body)
+                return
+        if self.path.startswith("/report"):
+            html_path = Path(__file__).with_name("US100_2026_Backtest_Report.html")
+            if html_path.exists():
+                body = html_path.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(body)
+                return
         payload = PAGE.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
