@@ -37,7 +37,7 @@ PAGE = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>US100</title>
+<title>Portal</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -80,6 +80,17 @@ PAGE = """<!DOCTYPE html>
     display: flex; align-items: center; gap: 0;
     padding: 12px 14px 12px 18px;
     backdrop-filter: blur(16px);
+  }
+  .brand {
+    flex: 0 0 auto;
+    margin-right: 8px;
+    padding-right: 14px;
+    border-right: 1px solid var(--line);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text);
   }
   .metrics { display: flex; flex-wrap: wrap; align-items: center; min-width: 0; flex: 1; }
   .metric { padding: 2px 16px; min-width: 0; }
@@ -146,7 +157,8 @@ PAGE = """<!DOCTYPE html>
   .side { font-weight: 700; letter-spacing: 0.06em; font-size: 13px; }
   .side.buy { color: var(--green); }
   .side.sell { color: var(--red); }
-  .pnl { margin-left: auto; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 28px; font-weight: 700; letter-spacing: -0.04em; }
+  .pnl { margin-left: auto; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 28px; font-weight: 700; letter-spacing: -0.04em; text-align: right; }
+  .pnl small { display: block; margin-top: 1px; font-size: 12px; font-weight: 600; letter-spacing: 0; color: var(--muted); }
   .up { color: var(--green); }
   .down { color: var(--red); }
   .hero { padding: 18px 18px 16px; display: grid; grid-template-columns: 1fr auto; gap: 6px 18px; align-items: end; }
@@ -278,6 +290,17 @@ function parsePx(text) {
   const n = Number(String(text == null ? "" : text).replace(/,/g, ""));
   return Number.isFinite(n) ? n : null;
 }
+function signedMoney(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return "";
+  const sign = v > 0 ? "+" : (v < 0 ? "-" : "");
+  return sign + "$" + Math.abs(v).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+function rText(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return "";
+  return (v > 0 ? "+" : "") + v.toFixed(2) + "R";
+}
 function roundRect(ctx, x, y, w, h, r) {
   const rr = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
@@ -321,17 +344,48 @@ function draw(chart, retry) {
     return;
   }
   const compact = cssW < 560;
+  const pos = chart.position || null;
+  const entry = pos ? parsePx(pos.entry) : null;
+  const initialSl = pos ? parsePx(pos.initial_sl) : null;
+  const stopPx = pos ? parsePx(pos.sl) : null;
+  const tpPx = pos ? parsePx(pos.tp) : null;
+  const partialPx = pos ? parsePx(pos.partial) : null;
+  const lockPx = pos ? parsePx(pos.lock4) : null;
+  const markPx = pos ? parsePx(pos.price) : null;
+  const buy = pos ? String(pos.side || "").toUpperCase() !== "SELL" : true;
+  const bid = parsePx(chart.bid);
+  let lo = Math.min.apply(null, bars.map(b => b.l));
+  let hi = Math.max.apply(null, bars.map(b => b.h));
+  let showTp = false;
+  let showLock = false;
+  if (pos && entry != null) {
+    [entry, initialSl, stopPx, partialPx, markPx].forEach(p => {
+      if (p != null) { lo = Math.min(lo, p); hi = Math.max(hi, p); }
+    });
+    const core = Math.max(hi - lo, Number(pos.r_pts) || 20);
+    const room = core * 1.9;
+    function take(p) {
+      if (p == null) return false;
+      return (Math.max(hi, p) - Math.min(lo, p)) <= room;
+    }
+    if (take(lockPx)) { lo = Math.min(lo, lockPx); hi = Math.max(hi, lockPx); showLock = true; }
+    if (take(tpPx)) { lo = Math.min(lo, tpPx); hi = Math.max(hi, tpPx); showTp = true; }
+    else if (tpPx != null) {
+      const extra = Math.max(core * 0.28, (Number(pos.r_pts) || 20) * 1.2);
+      if (buy) hi += extra; else lo -= extra;
+    }
+  }
   const tags = [];
   (chart.levels || []).forEach(level => {
     const price = Number(level.price);
     if (!Number.isFinite(price)) return;
+    if (pos && (price < lo || price > hi)) return;
     const priceText = price.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
     const label = String(level.label || "");
     const text = (!compact && /^[+-]/.test(label)) ? (label + "  " + priceText) : priceText;
     tags.push({price: price, color: level.color || "#e8edf5", dash: !!level.dash, text: text, kind: "level"});
   });
-  const bid = parsePx(chart.bid);
-  if (bid != null) {
+  if (!pos && bid != null) {
     tags.push({
       price: bid,
       color: "#f4f7fb",
@@ -340,14 +394,47 @@ function draw(chart, retry) {
       kind: "bid"
     });
   }
+  if (pos && entry != null) {
+    const priceText = p => p.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    tags.push({price: entry, color: "#e3b341", dash: false, text: "ENTRY  " + priceText(entry), kind: "level"});
+    if (stopPx != null) {
+      const risk = signedMoney(pos.locked_dollars);
+      const moved = initialSl == null || Math.abs(stopPx - initialSl) >= 0.05;
+      tags.push({price: stopPx, color: "#f43f5e", dash: true, text: "SL" + (risk ? "  " + risk : ""), kind: "level", line: moved});
+    }
+    if (partialPx != null && !pos.partial_taken) {
+      tags.push({
+        price: partialPx,
+        color: "#10b981",
+        dash: true,
+        text: compact ? "+0.75R" : "+0.75R (50% partial)",
+        kind: "level"
+      });
+    }
+    if (showLock && lockPx != null) {
+      tags.push({price: lockPx, color: "#6ee7b7", dash: true, text: "+4R lock", kind: "level"});
+    }
+    if (showTp && tpPx != null) {
+      const goal = signedMoney(pos.target_dollars);
+      tags.push({price: tpPx, color: "#10b981", dash: false, text: "TP" + (goal ? "  " + goal : ""), kind: "level"});
+    }
+    const livePx = markPx != null ? markPx : bid;
+    if (livePx != null) {
+      tags.push({
+        price: livePx,
+        color: "#f4f7fb",
+        dash: false,
+        text: "LIVE  " + signedMoney(pos.pnl) + "  ·  " + rText(pos.r_multiple),
+        kind: "bid"
+      });
+    }
+  }
   ctx.font = '600 11px "JetBrains Mono", Consolas, monospace';
   let gutter = 72;
   tags.forEach(tag => { gutter = Math.max(gutter, ctx.measureText(tag.text).width + 20); });
-  gutter = Math.min(gutter, Math.max(88, cssW * 0.38));
+  gutter = Math.min(gutter, Math.max(88, cssW * 0.42));
   const left = 10, right = Math.max(left + 40, cssW - gutter - 6), top = 16, bottom = cssH - 14;
-  let lo = Math.min.apply(null, bars.map(b => b.l));
-  let hi = Math.max.apply(null, bars.map(b => b.h));
-  tags.forEach(tag => { lo = Math.min(lo, tag.price); hi = Math.max(hi, tag.price); });
+  if (!pos) tags.forEach(tag => { lo = Math.min(lo, tag.price); hi = Math.max(hi, tag.price); });
   const pad = Math.max(hi - lo, 1) * 0.1;
   lo -= pad; hi += pad;
   const span = hi - lo || 1;
@@ -362,6 +449,33 @@ function draw(chart, retry) {
     ctx.stroke();
   }
   const slot = (right - left) / bars.length;
+  let entryX = left;
+  if (pos && entry != null) {
+    const stamp = Number(pos.entry_time);
+    let idx = -1;
+    if (Number.isFinite(stamp)) {
+      for (let i = 0; i < bars.length; i++) {
+        const t = Number(bars[i].time);
+        if (Number.isFinite(t) && t <= stamp) idx = i;
+      }
+    }
+    entryX = idx < 0 ? left : left + idx * slot + slot * 0.5;
+    const zoneW = Math.max(0, right - entryX);
+    function fillZone(yA, yB, fill) {
+      const y1 = Math.min(yA, yB);
+      const h = Math.max(1.5, Math.abs(yB - yA));
+      ctx.fillStyle = fill;
+      ctx.fillRect(entryX, y1, zoneW, h);
+    }
+    if (initialSl != null) fillZone(yOf(entry), yOf(initialSl), "rgba(244, 63, 94, 0.18)");
+    const profitY = (showTp && tpPx != null) ? yOf(tpPx) : (buy ? top : bottom);
+    fillZone(yOf(entry), profitY, "rgba(16, 185, 129, 0.16)");
+    const liveY = markPx != null ? markPx : bid;
+    if (liveY != null) {
+      const towardTarget = buy ? liveY >= entry : liveY <= entry;
+      fillZone(yOf(entry), yOf(liveY), towardTarget ? "rgba(16, 185, 129, 0.30)" : "rgba(244, 63, 94, 0.32)");
+    }
+  }
   bars.forEach((b, i) => {
     const x = left + i * slot + slot * 0.5;
     const up = b.c >= b.o;
@@ -378,28 +492,65 @@ function draw(chart, retry) {
     ctx.fillStyle = color;
     ctx.fillRect(x - bodyW / 2, y1, bodyW, Math.max(1, y2 - y1));
   });
+  if (pos && entry != null) {
+    function edge(yA, yB, color) {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.25;
+      ctx.setLineDash([]);
+      [yA, yB].forEach(y => {
+        const yy = Math.round(y) + 0.5;
+        ctx.beginPath();
+        ctx.moveTo(entryX, yy);
+        ctx.lineTo(right, yy);
+        ctx.stroke();
+      });
+    }
+    if (initialSl != null) edge(yOf(entry), yOf(initialSl), "#f43f5e");
+    edge(yOf(entry), (showTp && tpPx != null) ? yOf(tpPx) : (buy ? top : bottom), "#10b981");
+    ctx.fillStyle = "#e3b341";
+    ctx.beginPath();
+    ctx.arc(entryX, yOf(entry), 4.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#0c1018";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    if (tpPx != null && !showTp) {
+      const banner = "TP  " + tpPx.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2}) + (signedMoney(pos.target_dollars) ? "  " + signedMoney(pos.target_dollars) : "");
+      ctx.font = '600 11px "JetBrains Mono", Consolas, monospace';
+      const tw = ctx.measureText(banner).width + 14;
+      const bx = Math.max(left, right - tw - 8);
+      const by = buy ? top + 4 : bottom - 22;
+      ctx.fillStyle = "rgba(16,185,129,0.92)";
+      roundRect(ctx, bx, by, tw, 18, 6);
+      ctx.fill();
+      ctx.fillStyle = "#06281c";
+      ctx.textBaseline = "middle";
+      ctx.fillText(banner, bx + 7, by + 9);
+    }
+  }
   tags.forEach(tag => {
-    if (tag.kind === "bid") return;
+    if (tag.kind === "bid" || tag.line === false) return;
     const yy = Math.round(yOf(tag.price)) + 0.5;
     ctx.save();
     ctx.strokeStyle = tag.color;
-    ctx.globalAlpha = tag.dash ? 0.55 : 0.9;
+    ctx.globalAlpha = tag.dash ? 0.85 : 0.95;
     ctx.lineWidth = 1;
-    ctx.setLineDash(tag.dash ? [3, 4] : []);
+    ctx.setLineDash(tag.dash ? [4, 4] : []);
     ctx.beginPath();
-    ctx.moveTo(left, yy);
+    ctx.moveTo(pos ? entryX : left, yy);
     ctx.lineTo(right, yy);
     ctx.stroke();
     ctx.restore();
   });
-  if (bid != null) {
-    const yy = Math.round(yOf(bid)) + 0.5;
+  const liveTag = tags.filter(tag => tag.kind === "bid")[0];
+  if (liveTag) {
+    const yy = Math.round(yOf(liveTag.price)) + 0.5;
     ctx.save();
-    ctx.strokeStyle = "rgba(244,247,251,0.7)";
+    ctx.strokeStyle = "rgba(244,247,251,0.85)";
     ctx.setLineDash([2, 3]);
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(left, yy);
+    ctx.moveTo(pos ? entryX : left, yy);
     ctx.lineTo(right, yy);
     ctx.stroke();
     ctx.restore();
@@ -438,6 +589,7 @@ window.addEventListener("resize", () => { if (lastChart) draw(lastChart); });
 function render(data) {
   const day = data.day_pnl;
   document.getElementById("top").innerHTML =
+    '<div class="brand">Portal</div>' +
     '<div class="metrics">' +
       metric("London", esc(data.london)) +
       metric("New York", esc(data.ny)) +
@@ -453,7 +605,7 @@ function render(data) {
     trade.className = "trade card flat";
     trade.innerHTML = "Flat";
   } else {
-    const side = String(pos.side || "");
+    const side = String(pos.side || "").toLowerCase();
     trade.className = "trade card live " + side;
     trade.innerHTML =
       '<div class="kv"><span>Symbol</span><b>'+esc(pos.symbol)+'</b></div>' +
@@ -462,7 +614,7 @@ function render(data) {
       '<div class="kv"><span>Entry</span><b>'+esc(pos.entry)+'</b></div>' +
       '<div class="kv"><span>SL</span><b>'+esc(pos.sl)+'</b></div>' +
       '<div class="kv"><span>TP</span><b>'+esc(pos.tp)+'</b></div>' +
-      '<div class="pnl '+cls(pos.pnl)+'">'+money(pos.pnl)+'</div>';
+      '<div class="pnl '+cls(pos.pnl)+'">'+money(pos.pnl)+'<small>'+esc(rText(pos.r_multiple))+'</small></div>';
   }
 
   const hero = data.hero || {};
@@ -597,6 +749,7 @@ def chart_bars(symbol, timeframe, count, offset):
         when = bar_ny(rate["time"], offset)
         bars.append({
             "t": when.strftime("%H:%M"),
+            "time": int(rate["time"]),
             "day": when.strftime("%Y-%m-%d"),
             "o": float(rate["open"]),
             "h": float(rate["high"]),
@@ -836,12 +989,7 @@ def eleven_facts(now, minutes, bid, bars, day, opened, move):
 def chart_levels(now, minutes, bars, bid, position):
     day = now.strftime("%Y-%m-%d")
     levels = []
-    if position is not None:
-        levels.append(level(position.price_open, "#ffffff", px(position.price_open)))
-        if position.sl:
-            levels.append(level(position.sl, "#f85149", px(position.sl)))
-        if position.tp:
-            levels.append(level(position.tp, "#3fb950", px(position.tp)))
+    # An open position is drawn as the green/red position box, not as extra lines.
     # Only the window that is still ahead. A finished open (the 07:30 London
     # fade, once 07:35 has passed) stays off the chart until the next window's
     # own reference bar exists.
@@ -884,18 +1032,59 @@ def chart_levels(now, minutes, bars, bid, position):
     return levels
 
 
-def position_view(position):
+def position_view(position, bid, ask):
     if position is None:
         return None
     buy = position.type == mt5.POSITION_TYPE_BUY
+    entry = float(position.price_open)
+    sl = float(position.sl) if position.sl else None
+    tp = float(position.tp) if position.tp else None
+    volume = float(position.volume)
+    direction = 1.0 if buy else -1.0
+    r_pts = 20.0
+    initial_sl = entry - direction * r_pts
+    partial = entry + direction * r_pts * 0.75
+    lock4 = entry + direction * r_pts * 4.0
+    mark = float(bid if buy else ask)
+    r_multiple = ((mark - entry) * direction) / r_pts
+    pnl = float(position.profit) + float(position.swap)
+    info = mt5.symbol_info(position.symbol)
+    tick_size = float(info.trade_tick_size) if info and info.trade_tick_size else 0.0
+    tick_value = float(info.trade_tick_value) if info and info.trade_tick_value else 0.0
+
+    def cash(points):
+        if tick_size <= 0.0 or tick_value <= 0.0:
+            return None
+        return points / tick_size * tick_value * volume
+
+    partial_taken = False
+    opened = int(position.time)
+    deals = mt5.history_deals_get(opened - 60, opened + 8 * 86400) or []
+    ticket = int(getattr(position, "identifier", 0) or position.ticket)
+    for deal in deals:
+        if int(getattr(deal, "position_id", 0)) == ticket and int(deal.entry) == 1:
+            partial_taken = True
+            break
+    locked_pts = ((sl - entry) * direction) if sl is not None else -r_pts
     return {
         "symbol": position.symbol,
-        "side": "buy" if buy else "sell",
-        "volume": f"{float(position.volume):.2f}",
-        "entry": px(position.price_open),
-        "sl": px(position.sl) if position.sl else "—",
-        "tp": px(position.tp) if position.tp else "—",
-        "pnl": float(position.profit),
+        "side": "BUY" if buy else "SELL",
+        "volume": f"{volume:.2f}",
+        "entry": px(entry),
+        "entry_time": opened,
+        "sl": px(sl) if sl is not None else "—",
+        "tp": px(tp) if tp is not None else "—",
+        "initial_sl": px(initial_sl),
+        "r_pts": r_pts,
+        "partial": px(partial),
+        "partial_taken": partial_taken,
+        "lock4": px(lock4),
+        "price": px(mark),
+        "pnl": pnl,
+        "r_multiple": round(r_multiple, 2),
+        "risk_dollars": cash(-r_pts),
+        "target_dollars": None if tp is None else cash(abs(tp - entry)),
+        "locked_dollars": cash(locked_pts),
     }
 
 
@@ -974,6 +1163,7 @@ def snapshot_now():
     floating = sum(float(p.profit) for p in positions)
     today = bars[-1]["day"] if bars else ""
     session = [b for b in bars if b["day"] == today]
+    held = position_view(position, bid, ask)
     return {
         "london": uk.strftime("%H:%M:%S"),
         "ny": now.strftime("%H:%M:%S"),
@@ -981,11 +1171,12 @@ def snapshot_now():
         "equity": equity,
         "day_pnl": None if balance is None else closed + floating,
         "trading": "LIVE" if live else "LOCKED",
-        "position": position_view(position),
+        "position": held,
         "hero": hero_block(now, minutes, bid, bars),
         "chart": {
             "bars": session[-96:] or bars[-96:],
             "levels": chart_levels(now, minutes, bars, bid, position),
+            "position": held,
             "bid": px(bid),
             "ask": px(ask),
             "spread": f"{spread:.2f}",
