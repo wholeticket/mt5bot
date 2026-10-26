@@ -387,14 +387,14 @@ PAGE = """<!DOCTYPE html>
     </div>
 
     <div class="card">
-      <div class="card-head"><span>Weekly Schedule Overview (UK Time · FTMO 1-Step Sizing)</span></div>
+      <div class="card-head"><span>Weekly Schedule Overview (London · FTMO 1-Step Sizing)</span></div>
       <table>
-        <tr><th>Window (UK)</th><th>Setup</th><th>Active Days</th><th>Risk / Target</th></tr>
-        <tr><td><b>08:30 UK</b> (03:30 NY)</td><td>London Range-Fade (5..30 pts)</td><td>Mon Tue Wed Thu Fri</td><td>$660 · 15 SL / 90 TP</td></tr>
-        <tr><td><b>15:00 UK</b> (10:00 NY)</td><td>Thu 10am Snapback Fade (60+ pts)</td><td>Thursday only</td><td>$1,100 · 20 SL / 155 TP</td></tr>
-        <tr><td><b>16:00 UK</b> (11:00 NY)</td><td>11am Big Trend Shot (60+ pts)</td><td>Mon Wed Thu Fri</td><td>$1,100 · 20 SL / 155 TP</td></tr>
-        <tr><td><b>16:00 UK</b> (11:00 NY)</td><td>11am Mod Range-Fade (10..60 pts)</td><td>Mon Tue Wed</td><td>$660 · 20 SL / 120 TP</td></tr>
-        <tr><td><b>19:30 UK</b> (14:30 NY)</td><td>Afternoon Drive (80+ pts)</td><td>Wed Thu Fri</td><td>$660 · 20 SL / 100 TP</td></tr>
+        <tr><th>Window (London)</th><th>Setup</th><th>Active Days</th><th>Risk / Target</th></tr>
+        <tr><td><b>@@L0330@@ London</b> (03:30 NY)</td><td>London Range-Fade (5..30 pts)</td><td>Mon Tue Wed Thu Fri</td><td>$660 · 15 SL / 90 TP</td></tr>
+        <tr><td><b>@@L1000@@ London</b> (10:00 NY)</td><td>Thu 10am Snapback Fade (60+ pts)</td><td>Thursday only</td><td>$1,100 · 20 SL / 155 TP</td></tr>
+        <tr><td><b>@@L1100@@ London</b> (11:00 NY)</td><td>11am Big Trend Shot (60+ pts)</td><td>Mon Wed Thu Fri</td><td>$1,100 · 20 SL / 155 TP</td></tr>
+        <tr><td><b>@@L1100@@ London</b> (11:00 NY)</td><td>11am Mod Range-Fade (10..60 pts)</td><td>Mon Tue Wed</td><td>$660 · 20 SL / 120 TP</td></tr>
+        <tr><td><b>@@L1430@@ London</b> (14:30 NY)</td><td>Afternoon Drive (80+ pts)</td><td>Wed Thu Fri</td><td>$660 · 20 SL / 100 TP</td></tr>
       </table>
     </div>
 
@@ -649,6 +649,37 @@ def uk_now():
     return utc + timedelta(hours=offset)
 
 
+def london_hhmm(hour, minute, on=None):
+    """London wall clock for a New York hour and minute on this date.
+
+    London is GMT after the last Sunday in October. New York stays on EDT
+    until the first Sunday in November, so the gap is four hours, not five.
+    """
+    when = on or ny_now()
+    local = datetime(when.year, when.month, when.day, hour, minute)
+    for ny_offset in (-4, -5):
+        utc = local - timedelta(hours=ny_offset)
+        if us_dst(utc) == (ny_offset == -4):
+            uk_offset = 1 if uk_dst(utc) else 0
+            london = utc + timedelta(hours=uk_offset)
+            return f"{london.hour:02d}:{london.minute:02d}"
+    london = local + timedelta(hours=4)
+    return f"{london.hour:02d}:{london.minute:02d}"
+
+
+def page_html():
+    now = ny_now()
+    html = PAGE
+    for token, hour, minute in (
+        ("@@L0330@@", 3, 30),
+        ("@@L1000@@", 10, 0),
+        ("@@L1100@@", 11, 0),
+        ("@@L1430@@", 14, 30),
+    ):
+        html = html.replace(token, london_hhmm(hour, minute, now))
+    return html
+
+
 def bar_ny(bar_time, offset_hours):
     real_utc = datetime.fromtimestamp(int(bar_time) - offset_hours * 3600, timezone.utc)
     naive = real_utc.replace(tzinfo=None)
@@ -810,7 +841,10 @@ def trade_facts(position, bid):
 
 
 def london_card(now, minutes, bid, bars, position):
-    sub = "08:30 UK (03:30 NY) · Mon–Fri · $660 Risk"
+    open_lon = london_hhmm(3, 0, now)
+    fade_lon = london_hhmm(3, 30, now)
+    flat_lon = london_hhmm(9, 20, now)
+    sub = f"{fade_lon} London (03:30 NY) · Mon–Fri · $660 Risk"
     op3 = open_at(bars, "03:00")
     mv = None if op3 is None else (bid - op3)
     mv_txt = "—" if mv is None else f"{mv:+.1f} pts"
@@ -819,21 +853,21 @@ def london_card(now, minutes, bid, bars, position):
         side, word, facts = trade_facts(position, bid)
         return idea("london", "1. London Range-Fade", sub, "In a trade", side,
                     f"{word} {float(position.volume):.2f} lots open.", facts,
-                    ["Stop 15 pts, target 90 pts. Flattens by 14:20 UK (09:20 NY)."])
+                    [f"Stop 15 pts, target 90 pts. Flattens by {flat_lon} London (09:20 NY)."])
     if now.weekday() >= 5:
         return idea("london", "1. London Range-Fade", sub, "Standing aside", "",
-                    "Weekend — resumes Monday at 08:30 UK.",
+                    f"Weekend — resumes Monday at {fade_lon} London.",
                     [{"label": "Band", "value": "5..30 pts"}, {"label": "Stop / TP", "value": "15 / 90"},
                      {"label": "Risk", "value": "$660"}, {"label": "Full TP", "value": "+$2,228"}],
-                    ["Fades a 5..30 pt drift from 08:00 to 08:30 UK back toward the London open."])
+                    [f"Fades a 5..30 pt drift from {open_lon} to {fade_lon} London back toward the London open."])
     if minutes >= 3 * 60 + 35:
         return idea("london", "1. London Range-Fade", sub, "Passed", "",
-                    "08:30 UK London window has completed for today.",
-                    [{"label": "08:00 Open", "value": "—" if op3 is None else price_text(op3)},
-                     {"label": "Since 08:00", "value": mv_txt},
+                    f"{fade_lon} London window has completed for today.",
+                    [{"label": f"{open_lon} Open", "value": "—" if op3 is None else price_text(op3)},
+                     {"label": f"Since {open_lon}", "value": mv_txt},
                      {"label": "Band", "value": "5..30 pts"},
                      {"label": "Status", "value": "Done today"}],
-                    ["Any open London trade closes automatically at 14:20 UK before New York opens."])
+                    [f"Any open London trade closes automatically at {flat_lon} London before New York opens."])
     closes = bar_closes_in(now, 3 * 60 + 30)
     in_band = mv is not None and LONDON_MIN <= abs(mv) < LONDON_MAX
     if closes and in_band and position is None:
@@ -843,16 +877,18 @@ def london_card(now, minutes, bid, bars, position):
         state, side, lead = "Getting close", "", f"Move is {mv:+.1f} pts (inside 5..30 pt fade band)."
     else:
         state, side = "Watching", ""
-        lead = "Waiting for 08:00 UK open." if mv is None else f"Move since 08:00 UK: {mv:+.1f} pts (needs 5..30 pts)."
+        lead = f"Waiting for {open_lon} London open." if mv is None else f"Move since {open_lon} London: {mv:+.1f} pts (needs 5..30 pts)."
     return idea("london", "1. London Range-Fade", sub, state, side, lead,
-                [{"label": "Since 08:00 UK", "value": mv_txt}, {"label": "Fade Band", "value": "5..30 pts"},
+                [{"label": f"Since {open_lon} London", "value": mv_txt}, {"label": "Fade Band", "value": "5..30 pts"},
                  {"label": "Stop / TP", "value": "15 / 90 pts"},
-                 {"label": "08:30 UK in", "value": closes or clock_left(now, 3 * 60 + 30)}],
+                 {"label": f"{fade_lon} London in", "value": closes or clock_left(now, 3 * 60 + 30)}],
                 ["All 5 weekdays: fades a 5..30 pt London open drift ($660 risk, Full TP +$2,228)."])
 
 
 def thu10_card(now, minutes, bid, bars, position):
-    sub = "15:00 UK (10:00 NY) · Thursday Only · $1,100 Risk"
+    open_lon = london_hhmm(9, 30, now)
+    shot_lon = london_hhmm(10, 0, now)
+    sub = f"{shot_lon} London (10:00 NY) · Thursday Only · $1,100 Risk"
     op930 = open_at(bars, "09:30")
     mv = None if op930 is None else (bid - op930)
     mv_txt = "—" if mv is None else f"{mv:+.1f} pts"
@@ -861,7 +897,7 @@ def thu10_card(now, minutes, bid, bars, position):
         side, word, facts = trade_facts(position, bid)
         return idea("thu10", "2. Thu 10am Snapback", sub, "In a trade", side,
                     f"{word} {float(position.volume):.2f} lots open.", facts,
-                    ["Thursday 15:00 UK snapback fade. Stop 20 pts, target 155 pts."])
+                    [f"Thursday {shot_lon} London snapback fade. Stop 20 pts, target 155 pts."])
     if not fade10_day(now):
         return idea("thu10", "2. Thu 10am Snapback", sub, "Standing aside", "",
                     f"Today is {day_name(now)} — this setup only fires on Thursdays.",
@@ -870,29 +906,31 @@ def thu10_card(now, minutes, bid, bars, position):
                     ["Fades an exhausted 60+ pt surge in the first 30 mins of NY on Thursdays."])
     if minutes >= 10 * 60 + 5:
         return idea("thu10", "2. Thu 10am Snapback", sub, "Passed", "",
-                    "15:00 UK (10:00 NY) window has passed for today.",
-                    [{"label": "Since 14:30 UK", "value": mv_txt}, {"label": "Needed", "value": "60+ pts"},
+                    f"{shot_lon} London (10:00 NY) window has passed for today.",
+                    [{"label": f"Since {open_lon} London", "value": mv_txt}, {"label": "Needed", "value": "60+ pts"},
                      {"label": "Stop / TP", "value": "20 / 155"}, {"label": "Status", "value": "Done today"}],
-                    ["Next check today is the 16:00 UK (11:00 NY) Big Trend Shot."])
+                    [f"Next check today is the {london_hhmm(11, 0, now)} London (11:00 NY) Big Trend Shot."])
     closes = bar_closes_in(now, 10 * 60)
     met = mv is not None and abs(mv) >= SHOT_POINTS
     if closes and met and position is None:
         side = "sell" if mv > 0 else "buy"
         state, lead = "Ready", f"Ready to {side.upper()} (fade) the {mv:+.1f} pt opening spike."
     elif mv is not None and abs(mv) >= 40.0:
-        state, side, lead = "Getting close", "", f"Move is {mv:+.1f} pts since 14:30 UK (needs 60 pts)."
+        state, side, lead = "Getting close", "", f"Move is {mv:+.1f} pts since {open_lon} London (needs 60 pts)."
     else:
         state, side = "Watching", ""
-        lead = "Waiting for 14:30 UK NY open." if mv is None else f"Since 14:30 UK: {mv:+.1f} pts (needs 60+ pts)."
+        lead = f"Waiting for the {open_lon} London (09:30 NY) open." if mv is None else f"Since {open_lon} London: {mv:+.1f} pts (needs 60+ pts)."
     return idea("thu10", "2. Thu 10am Snapback", sub, state, side, lead,
-                [{"label": "Since 14:30 UK", "value": mv_txt}, {"label": "Needs", "value": "60+ pts"},
+                [{"label": f"Since {open_lon} London", "value": mv_txt}, {"label": "Needs", "value": "60+ pts"},
                  {"label": "Stop / TP", "value": "20 / 155 pts"},
-                 {"label": "15:00 UK in", "value": closes or clock_left(now, 10 * 60)}],
-                ["Thursdays at 15:00 UK: fades a 60+ pt 30-minute spike ($1,100 risk, Full TP +$4,675)."])
+                 {"label": f"{shot_lon} London in", "value": closes or clock_left(now, 10 * 60)}],
+                [f"Thursdays at {shot_lon} London: fades a 60+ pt 30-minute spike ($1,100 risk, Full TP +$4,675)."])
 
 
 def shot11_card(now, minutes, bid, bars, position):
-    sub = "16:00 UK (11:00 NY) · Mon/Wed/Thu/Fri · $1,100 Risk"
+    open_lon = london_hhmm(9, 30, now)
+    shot_lon = london_hhmm(11, 0, now)
+    sub = f"{shot_lon} London (11:00 NY) · Mon/Wed/Thu/Fri · $1,100 Risk"
     op930 = open_at(bars, "09:30")
     mv = None if op930 is None else (bid - op930)
     mv_txt = "—" if mv is None else f"{mv:+.1f} pts"
@@ -907,11 +945,11 @@ def shot11_card(now, minutes, bid, bars, position):
                     f"Today is {day_name(now)} — Trend Shots run Mon, Wed, Thu, Fri.",
                     [{"label": "Days", "value": "Mon Wed Thu Fri"}, {"label": "Trigger", "value": "60+ pts"},
                      {"label": "Stop / TP", "value": "20 / 155 pts"}, {"label": "Full TP", "value": "+$4,675"}],
-                    ["On Tuesday, 16:00 UK only trades the 10..60 pt Range-Fade."])
+                    [f"On Tuesday, {shot_lon} London only trades the 10..60 pt Range-Fade."])
     if minutes >= 11 * 60 + 5:
         return idea("shot11", "3. 11am Big Trend Shot", sub, "Passed", "",
-                    "16:00 UK (11:00 NY) window has completed for today.",
-                    [{"label": "Since 14:30 UK", "value": mv_txt}, {"label": "Needed", "value": "60+ pts"},
+                    f"{shot_lon} London (11:00 NY) window has completed for today.",
+                    [{"label": f"Since {open_lon} London", "value": mv_txt}, {"label": "Needed", "value": "60+ pts"},
                      {"label": "Stop / TP", "value": "20 / 155"}, {"label": "Status", "value": "Done today"}],
                     ["Rides 60+ pt morning breakouts in the direction of the trend."])
     closes = bar_closes_in(now, 11 * 60)
@@ -920,19 +958,21 @@ def shot11_card(now, minutes, bid, bars, position):
         side = "buy" if mv > 0 else "sell"
         state, lead = "Ready", f"Ready to {side.upper()} with the {mv:+.1f} pt breakout."
     elif mv is not None and abs(mv) >= 40.0:
-        state, side, lead = "Getting close", "", f"Move is {mv:+.1f} pts since 14:30 UK (needs 60+ pts)."
+        state, side, lead = "Getting close", "", f"Move is {mv:+.1f} pts since {open_lon} London (needs 60+ pts)."
     else:
         state, side = "Watching", ""
-        lead = "Waiting for 14:30 UK NY open." if mv is None else f"Since 14:30 UK: {mv:+.1f} pts (needs 60+ pts)."
+        lead = f"Waiting for the {open_lon} London (09:30 NY) open." if mv is None else f"Since {open_lon} London: {mv:+.1f} pts (needs 60+ pts)."
     return idea("shot11", "3. 11am Big Trend Shot", sub, state, side, lead,
-                [{"label": "Since 14:30 UK", "value": mv_txt}, {"label": "Needs", "value": "60+ pts"},
+                [{"label": f"Since {open_lon} London", "value": mv_txt}, {"label": "Needs", "value": "60+ pts"},
                  {"label": "Stop / TP", "value": "20 / 155 pts"},
-                 {"label": "16:00 UK in", "value": closes or clock_left(now, 11 * 60)}],
-                ["Mon/Wed/Thu/Fri at 16:00 UK: rides a 60+ pt breakout ($1,100 risk, Full TP +$4,675)."])
+                 {"label": f"{shot_lon} London in", "value": closes or clock_left(now, 11 * 60)}],
+                [f"Mon/Wed/Thu/Fri at {shot_lon} London: rides a 60+ pt breakout ($1,100 risk, Full TP +$4,675)."])
 
 
 def fade11_card(now, minutes, bid, bars, position):
-    sub = "16:00 UK (11:00 NY) · Mon/Tue/Wed · $660 Risk"
+    open_lon = london_hhmm(9, 30, now)
+    shot_lon = london_hhmm(11, 0, now)
+    sub = f"{shot_lon} London (11:00 NY) · Mon/Tue/Wed · $660 Risk"
     op930 = open_at(bars, "09:30")
     mv = None if op930 is None else (bid - op930)
     mv_txt = "—" if mv is None else f"{mv:+.1f} pts"
@@ -950,10 +990,10 @@ def fade11_card(now, minutes, bid, bars, position):
                     ["Skipped on Thu/Fri because Thu/Fri mornings trend into the afternoon."])
     if minutes >= 11 * 60 + 5:
         return idea("fade11", "4. 11am Range-Fade", sub, "Passed", "",
-                    "16:00 UK (11:00 NY) window has completed for today.",
-                    [{"label": "Since 14:30 UK", "value": mv_txt}, {"label": "Band", "value": "10..60 pts"},
+                    f"{shot_lon} London (11:00 NY) window has completed for today.",
+                    [{"label": f"Since {open_lon} London", "value": mv_txt}, {"label": "Band", "value": "10..60 pts"},
                      {"label": "Stop / TP", "value": "20 / 120"}, {"label": "Status", "value": "Done today"}],
-                    ["Fades moderate 10..60 pt morning moves back toward the 14:30 UK open."])
+                    [f"Fades moderate 10..60 pt morning moves back toward the {open_lon} London open."])
     closes = bar_closes_in(now, 11 * 60)
     in_band = mv is not None and FALLBACK_MIN <= abs(mv) < SHOT_POINTS
     if closes and in_band and position is None:
@@ -963,16 +1003,19 @@ def fade11_card(now, minutes, bid, bars, position):
         state, side, lead = "Getting close", "", f"Move is {mv:+.1f} pts (inside 10..60 pt fade band)."
     else:
         state, side = "Watching", ""
-        lead = "Waiting for 14:30 UK NY open." if mv is None else f"Since 14:30 UK: {mv:+.1f} pts (band is 10..60 pts)."
+        lead = f"Waiting for the {open_lon} London (09:30 NY) open." if mv is None else f"Since {open_lon} London: {mv:+.1f} pts (band is 10..60 pts)."
     return idea("fade11", "4. 11am Range-Fade", sub, state, side, lead,
-                [{"label": "Since 14:30 UK", "value": mv_txt}, {"label": "Fade Band", "value": "10..60 pts"},
+                [{"label": f"Since {open_lon} London", "value": mv_txt}, {"label": "Fade Band", "value": "10..60 pts"},
                  {"label": "Stop / TP", "value": "20 / 120 pts"},
-                 {"label": "16:00 UK in", "value": closes or clock_left(now, 11 * 60)}],
-                ["Mon/Tue/Wed at 16:00 UK: fades a 10..60 pt morning drift ($660 risk, Full TP +$2,228)."])
+                 {"label": f"{shot_lon} London in", "value": closes or clock_left(now, 11 * 60)}],
+                [f"Mon/Tue/Wed at {shot_lon} London: fades a 10..60 pt morning drift ($660 risk, Full TP +$2,228)."])
 
 
 def pm1430_card(now, minutes, bid, bars, position):
-    sub = "19:30 UK (14:30 NY) · Wed/Thu/Fri · $660 Risk"
+    open_lon = london_hhmm(13, 0, now)
+    drive_lon = london_hhmm(14, 30, now)
+    flat_lon = london_hhmm(15, 55, now)
+    sub = f"{drive_lon} London (14:30 NY) · Wed/Thu/Fri · $660 Risk"
     op13 = open_at(bars, "13:00")
     mv = None if op13 is None else (bid - op13)
     mv_txt = "—" if mv is None else f"{mv:+.1f} pts"
@@ -987,28 +1030,28 @@ def pm1430_card(now, minutes, bid, bars, position):
                     f"Today is {day_name(now)} — Afternoon Drive runs Wed, Thu, Fri.",
                     [{"label": "Days", "value": "Wed Thu Fri"}, {"label": "Trigger", "value": "80+ pts"},
                      {"label": "Stop / TP", "value": "20 / 100 pts"}, {"label": "Full TP", "value": "+$1,898"}],
-                    ["Rides strong 80+ pt afternoon trends from 18:00 UK into the 20:55 UK close."])
+                    [f"Rides strong 80+ pt afternoon trends from {open_lon} London into the {flat_lon} London close."])
     if minutes >= 14 * 60 + 35:
         return idea("pm1430", "5. 14:30 PM Drive", sub, "Passed", "",
-                    "19:30 UK (14:30 NY) window has completed for today.",
-                    [{"label": "Since 18:00 UK", "value": mv_txt}, {"label": "Needed", "value": "80+ pts"},
+                    f"{drive_lon} London (14:30 NY) window has completed for today.",
+                    [{"label": f"Since {open_lon} London", "value": mv_txt}, {"label": "Needed", "value": "80+ pts"},
                      {"label": "Stop / TP", "value": "20 / 100"}, {"label": "Status", "value": "Done today"}],
-                    ["All open trades flatten at 20:55 UK (15:55 NY)."])
+                    [f"All open trades flatten at {flat_lon} London (15:55 NY)."])
     closes = bar_closes_in(now, 14 * 60 + 30)
     met = mv is not None and abs(mv) >= PM_DRIVE_POINTS
     if closes and met and position is None:
         side = "buy" if mv > 0 else "sell"
         state, lead = "Ready", f"Ready to {side.upper()} the {mv:+.1f} pt afternoon drive."
     elif mv is not None and abs(mv) >= 55.0:
-        state, side, lead = "Getting close", "", f"Move since 18:00 UK is {mv:+.1f} pts (needs 80+ pts)."
+        state, side, lead = "Getting close", "", f"Move since {open_lon} London is {mv:+.1f} pts (needs 80+ pts)."
     else:
         state, side = "Watching", ""
-        lead = "Waiting for 18:00 UK (13:00 NY) open." if mv is None else f"Since 18:00 UK: {mv:+.1f} pts (needs 80+ pts)."
+        lead = f"Waiting for {open_lon} London (13:00 NY) open." if mv is None else f"Since {open_lon} London: {mv:+.1f} pts (needs 80+ pts)."
     return idea("pm1430", "5. 14:30 PM Drive", sub, state, side, lead,
-                [{"label": "Since 18:00 UK", "value": mv_txt}, {"label": "Needs", "value": "80+ pts"},
+                [{"label": f"Since {open_lon} London", "value": mv_txt}, {"label": "Needs", "value": "80+ pts"},
                  {"label": "Stop / TP", "value": "20 / 100 pts"},
-                 {"label": "19:30 UK in", "value": closes or clock_left(now, 14 * 60 + 30)}],
-                ["Wed/Thu/Fri at 19:30 UK: rides an 80+ pt drive since 18:00 UK if flat ($660 risk)."])
+                 {"label": f"{drive_lon} London in", "value": closes or clock_left(now, 14 * 60 + 30)}],
+                [f"Wed/Thu/Fri at {drive_lon} London: rides an 80+ pt drive since {open_lon} London if flat ($660 risk)."])
 
 
 def board_summary(now, uk, ideas, position):
@@ -1019,7 +1062,7 @@ def board_summary(now, uk, ideas, position):
     if active:
         nxt = active[0]
         return f"{day_name(now)} · Next Active Setup: {nxt['name']} ({nxt['subtitle']}) — {nxt['lead']}"
-    return f"{day_name(now)} · All trading windows for today have completed. Next window: Tomorrow 08:30 UK London Open Fade."
+    return f"{day_name(now)} · All trading windows for today have completed. Next window: Tomorrow {london_hhmm(3, 30, now)} London Open Fade."
 
 
 def nas_view(now, minutes, bid, ask, spread_pts, bars, position):
@@ -1028,13 +1071,13 @@ def nas_view(now, minutes, bid, ask, spread_pts, bars, position):
     open1300 = open_at(bars, "13:00")
     levels = []
     if open0300 is not None and minutes < 9 * 60 + 30:
-        levels.append(level(open0300, "#58a6ff", f"{open0300:.2f}", name="08:00 UK London Open"))
+        levels.append(level(open0300, "#58a6ff", f"{open0300:.2f}", name=f"{london_hhmm(3, 0, now)} London Open"))
     if open930 is not None:
-        levels.append(level(open930, "#e3b341", f"{open930:.2f}", name="14:30 UK (09:30 NY) Open"))
+        levels.append(level(open930, "#e3b341", f"{open930:.2f}", name=f"{london_hhmm(9, 30, now)} London (09:30 NY) Open"))
         levels.append(level(open930 + SHOT_POINTS, "#8b949e", f"{open930 + SHOT_POINTS:.2f}", True, "+60 Shot"))
         levels.append(level(open930 - SHOT_POINTS, "#8b949e", f"{open930 - SHOT_POINTS:.2f}", True, "-60 Shot"))
     if open1300 is not None and minutes >= 13 * 60:
-        levels.append(level(open1300, "#a371f7", f"{open1300:.2f}", True, "18:00 UK (13:00 NY) Open"))
+        levels.append(level(open1300, "#a371f7", f"{open1300:.2f}", True, f"{london_hhmm(13, 0, now)} London (13:00 NY) Open"))
     if position is not None:
         levels = position_levels(position) + levels
     last = bars[-1] if bars else None
@@ -1184,7 +1227,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
                 return
-        payload = PAGE.encode("utf-8")
+        payload = page_html().encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
