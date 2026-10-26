@@ -840,21 +840,32 @@ def chart_levels(now, minutes, bars, bid, position):
             levels.append(level(position.sl, "#f85149", px(position.sl)))
         if position.tp:
             levels.append(level(position.tp, "#3fb950", px(position.tp)))
-    if minutes < 9 * 60 + 30:
-        opened = bar_at(bars, "03:00", day)
-        if opened:
-            price = opened["o"]
-            levels += [
-                level(price, "#e3b341", px(price)),
-                level(price + LONDON_MIN, "#8b949e", f"+{LONDON_MIN:.0f}", True),
-                level(price - LONDON_MIN, "#8b949e", f"-{LONDON_MIN:.0f}", True),
-                level(price + LONDON_MAX, "#58a6ff", f"+{LONDON_MAX:.0f}", True),
-                level(price - LONDON_MAX, "#58a6ff", f"-{LONDON_MAX:.0f}", True),
-            ]
+    # Only the window that is still ahead. A finished open (the 07:30 London
+    # fade, once 07:35 has passed) stays off the chart until the next window's
+    # own reference bar exists.
+    specs = [s for s in windows_for(now) if now.weekday() in s["days"]]
+    nxt = next((s for s in specs if minutes < s["ny"] + 5), None)
+    if nxt is None or minutes < nxt["open"]:
         return levels
-    opened = bar_at(bars, "09:30", day)
-    if opened:
-        price = opened["o"]
+    opened = bar_at(bars, hhmm(nxt["open"]), day)
+    if opened is None:
+        return levels
+    price = opened["o"]
+    if nxt["id"] == "london":
+        levels += [
+            level(price, "#e3b341", px(price)),
+            level(price + LONDON_MIN, "#8b949e", f"+{LONDON_MIN:.0f}", True),
+            level(price - LONDON_MIN, "#8b949e", f"-{LONDON_MIN:.0f}", True),
+            level(price + LONDON_MAX, "#58a6ff", f"+{LONDON_MAX:.0f}", True),
+            level(price - LONDON_MAX, "#58a6ff", f"-{LONDON_MAX:.0f}", True),
+        ]
+    elif nxt["id"] == "thu":
+        levels += [
+            level(price, "#e3b341", px(price)),
+            level(price + SHOT_POINTS, "#58a6ff", "+60", True),
+            level(price - SHOT_POINTS, "#58a6ff", "-60", True),
+        ]
+    elif nxt["id"] == "eleven":
         levels += [
             level(price, "#e3b341", px(price)),
             level(price + FALLBACK_MIN, "#8b949e", "+10", True),
@@ -862,9 +873,7 @@ def chart_levels(now, minutes, bars, bid, position):
             level(price + SHOT_POINTS, "#58a6ff", "+60", True),
             level(price - SHOT_POINTS, "#58a6ff", "-60", True),
         ]
-    pm_open = bar_at(bars, "13:00", day) if minutes >= 13 * 60 else None
-    if pm_open and now.weekday() in (2, 3, 4):
-        price = pm_open["o"]
+    else:
         levels += [
             level(price, "#d2a8ff", px(price)),
             level(price + PM_DRIVE_POINTS, "#d2a8ff", "+80", True),
