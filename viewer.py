@@ -1032,6 +1032,42 @@ def chart_levels(now, minutes, bars, bid, position):
     return levels
 
 
+def opening_stop_points(position, entry, direction, sl, partial_taken):
+    """Original stop distance. The opening order keeps the first SL after the stop is moved."""
+    ticket = int(getattr(position, "identifier", 0) or position.ticket)
+    opened = int(position.time)
+    open_type = mt5.ORDER_TYPE_BUY if direction > 0 else mt5.ORDER_TYPE_SELL
+    orders = mt5.history_orders_get(opened - 300, opened + 8 * 86400) or []
+    best = None
+    for order in orders:
+        if int(getattr(order, "position_id", 0) or 0) != ticket:
+            continue
+        if int(order.type) != open_type:
+            continue
+        order_sl = float(order.sl or 0.0)
+        if order_sl <= 0.0 or (entry - order_sl) * direction <= 0.0:
+            continue
+        dist = abs(entry - order_sl)
+        if dist < 1.0:
+            continue
+        when = int(getattr(order, "time_setup", 0) or getattr(order, "time_done", 0) or 0)
+        if best is None or when < best[0]:
+            best = (when, dist)
+    if best is not None:
+        return best[1]
+    if sl is not None and not partial_taken and (entry - sl) * direction > 0.0:
+        dist = abs(entry - sl)
+        if dist >= 1.0:
+            return dist
+    if sl is not None and partial_taken:
+        signed = (sl - entry) * direction
+        if signed < -1.0:
+            return abs(signed) / 0.70
+        if signed > 1.0:
+            return signed / 1.50
+    return 20.0
+
+
 def position_view(position, bid, ask):
     if position is None:
         return None
@@ -1041,12 +1077,7 @@ def position_view(position, bid, ask):
     tp = float(position.tp) if position.tp else None
     volume = float(position.volume)
     direction = 1.0 if buy else -1.0
-    r_pts = 20.0
-    initial_sl = entry - direction * r_pts
-    partial = entry + direction * r_pts * 0.75
-    lock4 = entry + direction * r_pts * 4.0
     mark = float(bid if buy else ask)
-    r_multiple = ((mark - entry) * direction) / r_pts
     pnl = float(position.profit) + float(position.swap)
     info = mt5.symbol_info(position.symbol)
     tick_size = float(info.trade_tick_size) if info and info.trade_tick_size else 0.0
@@ -1065,6 +1096,11 @@ def position_view(position, bid, ask):
         if int(getattr(deal, "position_id", 0)) == ticket and int(deal.entry) == 1:
             partial_taken = True
             break
+    r_pts = round(opening_stop_points(position, entry, direction, sl, partial_taken), 2)
+    initial_sl = entry - direction * r_pts
+    partial = entry + direction * r_pts * 0.75
+    lock4 = entry + direction * r_pts * 4.0
+    r_multiple = ((mark - entry) * direction) / r_pts
     locked_pts = ((sl - entry) * direction) if sl is not None else -r_pts
     return {
         "symbol": position.symbol,
@@ -1421,6 +1457,7 @@ foreach ($folder in $folders) {
 
 Write-Output ""
 Write-Output "Strategy Tester is set to RobustForexEA.ex5, US100.cash, M5, real ticks, 2026.01.01-2026.10.26, v6.50 inputs."
+Write-Output "The 15:00 London (11:00 NY) trend shot uses a 50-point stop. Thursday's 14:00 snapback stays at 20 points."
 Write-Output "A full 2026 M5 test is about 57,000 bars. About 11,000 bars means the period was not M5, and this book then takes 0 trades."
 Write-Output "Close MetaTrader if it is open, then start it again and open View -> Strategy Tester. Leave the period on M5."
 """

@@ -47,7 +47,7 @@ input double InpOrbRewardRisk=1.5;
 input bool   InpOrbRequireDrive=true;
 input int    InpOrbStyle=2;             // 0 range break, 1 with the drive, 2 fade the drive
 input double InpOrbMinDrivePoints=5.0;
-input double InpOrbFixedStopPoints=20.0; // 5-rule book: 20-point stop on the $1,100 shot
+input double InpOrbFixedStopPoints=20.0; // Thu 14:00 stop (20). 15:00 trend stop is 50, locked in OnInit
 input bool   InpOrbShortsOnly=true;
 input bool   InpOrbMorningOnly=true;
 input int    InpOrbMaxMorningEntries=1; // 0 keeps two shorts, or three on a large drive
@@ -537,13 +537,15 @@ int OnInit(void)
    orb.london_max_burst10=22.0; // skip London fade if last 10m spiked > 22 pts
    orb.fade10_max_burst10=65.0; // skip Thu 10am fade if last 10m spiked > 65 pts
    orb.shot11_max_burst10=55.0; // skip 11am trend shot if last 10m already exhausted > 55 pts
+   orb.shot11_stop=50.0;        // 11:00 NY trend shot only. Thursday fade stays on fixed_stop
    orb.pm_max_burst10=50.0;     // skip 14:30 PM drive if last 10m already dumped/spiked > 50 pts
    // Fixed 5-rule book for the live chart and Strategy Tester. A saved
    // chart or an old tester .set cannot change the windows, stops, or targets.
    orb.weekdays=29;             // Mon/Wed/Thu/Fri 15:00 London (11:00 NY) trend
    orb.morning_fade=false;
    orb.day_shots=true;
-   orb.fixed_stop=20.0;
+   orb.fixed_stop=20.0;         // Thursday 14:00 snapback. Not the 15:00 trend shot
+   orb.shot11_stop=50.0;        // 15:00 London (11:00 NY) 60+ trend shot, $1,100, 22 lots
    orb.day_target=155.0;
    orb.daily_on=true;
    g_tester_risk_money=1100.0;
@@ -552,13 +554,13 @@ int OnInit(void)
 
    g_last_bar_time=iTime(_Symbol,InpEntryTimeframe,0);
    ShowBotLabel();
-   Print("PASS BOT v6.50 | US100.cash 5-Rule Sniper Book | 07:30 London Fade ($660) · 14:00 Thu Snapback ($1,100) · 15:00 London Trend ($1,100) / Fade ($660) · 18:30 Wed-Fri Drive ($660) | Runner: 50% @ +0.75R, SL -> -0.70R, +4R -> +1.5R | Daily Cap: +$600 / -$2,000");
+   Print("PASS BOT v6.50 | US100.cash 5-Rule Sniper Book | 07:30 London Fade ($660) · 14:00 Thu Snapback ($1,100, 20-pt stop) · 15:00 London Trend ($1,100, 50-pt stop) / Fade ($660) · 18:30 Wed-Fri Drive ($660) | Runner: 50% @ +0.75R, SL -> -0.70R, +4R -> +1.5R | Daily Cap: +$600 / -$2,000");
    PrintFormat("EA|event=initialized|bot=%s|symbol=%s|entry=%s|structure=%s|bias=%s|magic=%I64u",
                BotLabel(),_Symbol,EnumToString(InpEntryTimeframe),EnumToString(InpStructureTimeframe),
                EnumToString(InpBiasTimeframe),InpMagicNumber);
-   PrintFormat("EA|event=book|mode=FTMO_1STEP_100K_SNIPER_V650|london=1|lon_stop=15|lon_target=90|daily=%d|daily_days=%d|daily_stop=%.0f|daily_target=%.0f|daily_risk=660|shots=%d|weekdays=%d|fade10=%d|stop=%.0f|target=%.0f|risk=1100|pm1430=1|partial=0.50|trig=0.75R|cushion=-0.70|lock4R=1.5R|us_holiday_ban=%d|daily_loss_lock=2000|daily_win_lock=600|eod_trail_lock=9000|consistency_cap=4750",
+   PrintFormat("EA|event=book|mode=FTMO_1STEP_100K_SNIPER_V650|london=1|lon_stop=15|lon_target=90|daily=%d|daily_days=%d|daily_stop=%.0f|daily_target=%.0f|daily_risk=660|shots=%d|weekdays=%d|fade10=%d|fade_stop=%.0f|trend_stop=%.0f|target=%.0f|risk=1100|pm1430=1|partial=0.50|trig=0.75R|cushion=-0.70|lock4R=1.5R|us_holiday_ban=%d|daily_loss_lock=2000|daily_win_lock=600|eod_trail_lock=9000|consistency_cap=4750",
                (int)orb.daily_on,orb.daily_weekdays,orb.daily_stop,orb.daily_target,(int)orb.day_shots,orb.weekdays,
-               orb.fade10_weekdays,orb.fixed_stop,orb.day_target,(int)orb.skip_us_holidays);
+               orb.fade10_weekdays,orb.fixed_stop,orb.shot11_stop,orb.day_target,(int)orb.skip_us_holidays);
    PrintFormat("EA|event=structure|enabled=%d|continuation=%d|inverse=%d",
                (int)InpTradeWithStructure,(int)InpAllowContinuation,(int)InpAllowInverse);
    ReplayOpeningRange();
@@ -990,7 +992,7 @@ void ShowBotLabel(void)
               "1-Step Guards: 1 Big Win ($600+) & Done · 3% Daily Loss Lock ($2,000) · 10% EOD Trailing · 50% Consistency ($4,750)\n"+
               "All weekdays 08:30 UK (03:30 NY) fade a 5..30 point London move ($660, stop 15, target 90)\n"+
               StringFormat("Thu 10:00 NY fade a %.0f-point move ($1,100, stop 20, target 155)",InpDayShotPoints)+"\n"+
-              StringFormat("Mon/Wed/Thu/Fri 11:00 NY go with a %.0f-point move ($1,100, stop 20, target 155, 10m burst <= 55)",InpDayShotPoints)+"\n"+
+              StringFormat("Mon/Wed/Thu/Fri 11:00 NY go with a %.0f-point move ($1,100, stop 50, target 155, 10m burst <= 55)",InpDayShotPoints)+"\n"+
               "Mon/Tue/Wed 11:00 NY fade a 10..60 point range move ($660, stop 20, target 120)\n"+
               "Wed/Thu/Fri 14:30 NY go with an 80-point afternoon drive from 13:00 ($660, stop 20, target 100, 10m burst <= 50)\n"+
               "US Market Holidays: Banned (NYSE/Nasdaq holidays skipped)\n"+

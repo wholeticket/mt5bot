@@ -52,6 +52,7 @@ struct OrbSettings
    double london_max_burst10;  // max 10-min burst into 03:30 NY (22 pts)
    double fade10_max_burst10;  // max 10-min burst into 10:00 NY (65 pts)
    double shot11_max_burst10;  // max 10-min burst into 11:00 NY (55 pts)
+   double shot11_stop;         // 11:00 NY trend shot stop (50 pts). Thursday fade keeps fixed_stop
    double pm_max_burst10;      // max 10-min burst into 14:30 NY (50 pts)
   };
 
@@ -438,10 +439,11 @@ public:
      }
 
    // Two later shots off the same 09:30 open. At 10:00 a move of day_move
-   // points is faded on fade10_weekdays (Thursday). At 11:00 a move of that
-   // size is taken in its own direction on shot weekdays (Mon/Wed/Thu/Fri).
-   // Each one gets a single try. The target is day_target points beyond that
-   // bar's close, and the position is held to the cash close.
+   // points is faded on fade10_weekdays (Thursday) with fixed_stop. At 11:00
+   // a move of that size is taken in its own direction on shot weekdays
+   // (Mon/Wed/Thu/Fri) with shot11_stop. Each one gets a single try. The
+   // target is day_target points beyond that bar's close, and the position
+   // is held to the cash close.
    ENUM_ICT_SIGNAL DayShots(const MqlRates &bar,const int bar_min,const int dow,
                             double &stop_distance,double &target)
      {
@@ -493,6 +495,8 @@ public:
 
       bool buy=(fade_bar ? move<0.0 : move>0.0);
       stop_distance=m_cfg.fixed_stop;
+      if(with_bar && m_cfg.shot11_stop>0.0)
+         stop_distance=m_cfg.shot11_stop;
       target=bar.close+(buy ? m_cfg.day_target : -m_cfg.day_target);
       return (buy ? ICT_SIGNAL_BUY : ICT_SIGNAL_SELL);
      }
