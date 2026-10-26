@@ -36,93 +36,225 @@ PAGE = """<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>US100</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0b0e14;
-    --panel: #121722;
-    --line: #232c3d;
-    --text: #e6edf3;
-    --muted: #8b949e;
-    --green: #3fb950;
-    --red: #f85149;
+    --bg: #090b10;
+    --card: #10141d;
+    --card-2: #131824;
+    --line: rgba(255,255,255,0.07);
+    --text: #e8edf5;
+    --muted: #7d8590;
+    --green: #10b981;
+    --red: #f43f5e;
     --gold: #e3b341;
-    --blue: #58a6ff;
+    --sans: Inter, "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", "SFMono-Regular", "SF Mono", ui-monospace, Consolas, monospace;
+    --lift: inset 0 1px 0 rgba(255,255,255,0.06);
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.35 ui-sans-serif, system-ui, "Segoe UI", sans-serif; }
-  body { padding: 14px 16px 28px; }
-  .top, .trade, .hero, .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
-  .top {
-    display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center;
-    padding: 10px 14px; position: sticky; top: 0; z-index: 2;
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    color: var(--text);
+    font: 14px/1.4 var(--sans);
+    font-variant-numeric: tabular-nums;
+    color-scheme: dark;
+    background:
+      radial-gradient(900px 420px at 0% -10%, rgba(16,185,129,0.07), transparent 55%),
+      var(--bg);
+    padding: 20px 22px 48px;
   }
-  .clock b, .stat b { font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 700; }
-  .clock span, .stat span { display: block; color: var(--muted); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
-  .stat { margin-left: 4px; }
-  .pill { margin-left: auto; font-weight: 800; letter-spacing: .08em; font-size: 13px; padding: 6px 10px; border-radius: 999px; }
-  .pill.live { color: #04210c; background: var(--green); }
-  .pill.locked { color: #fff; background: var(--red); }
-  .trade { margin-top: 10px; padding: 8px 14px; }
-  .trade.flat { color: var(--muted); }
-  .trade.live { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; border-color: #2d4a34; }
-  .trade .side { font-weight: 800; letter-spacing: .04em; }
-  .trade .side.buy { color: var(--green); }
-  .trade .side.sell { color: var(--red); }
-  .trade .pnl { margin-left: auto; font-size: 28px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .shell { width: 100%; max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .card {
+    background: linear-gradient(180deg, rgba(255,255,255,0.035), transparent 42px), var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: var(--lift);
+  }
+  .top {
+    position: sticky; top: 10px; z-index: 3;
+    display: flex; align-items: center; gap: 0;
+    padding: 12px 14px 12px 18px;
+    backdrop-filter: blur(16px);
+  }
+  .metrics { display: flex; flex-wrap: wrap; align-items: center; min-width: 0; flex: 1; }
+  .metric { padding: 2px 16px; min-width: 0; }
+  .metric + .metric { box-shadow: inset 1px 0 0 var(--line); }
+  .metric span, .kicker, .panel h2, .fact span {
+    display: block;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  th {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .num {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    font-size: 16px;
+    letter-spacing: -0.03em;
+    color: #f4f7fb;
+  }
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    margin-left: 8px; flex: none;
+    padding: 7px 12px; border-radius: 999px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+  }
+  .pill.live { color: #6ee7b7; background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.38); }
+  .pill.locked { color: #fda4af; background: rgba(244,63,94,0.12); border: 1px solid rgba(244,63,94,0.35); }
+  .pill i {
+    width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: block;
+  }
+  .pill.live i { background: var(--green); box-shadow: 0 0 0 0 rgba(16,185,129,0.65); animation: pulse 1.8s ease-out infinite; }
+  @keyframes pulse {
+    70% { box-shadow: 0 0 0 7px rgba(16,185,129,0); }
+    100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
+  }
+  .trade { padding: 12px 16px; color: var(--muted); font-size: 13px; }
+  .trade.live {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px;
+    color: var(--text);
+    border-color: rgba(16,185,129,0.32);
+    background:
+      linear-gradient(180deg, rgba(16,185,129,0.10), transparent 48px),
+      var(--card);
+    box-shadow: var(--lift), 0 10px 32px rgba(16,185,129,0.06);
+  }
+  .trade.live.sell {
+    border-color: rgba(244,63,94,0.32);
+    background:
+      linear-gradient(180deg, rgba(244,63,94,0.10), transparent 48px),
+      var(--card);
+    box-shadow: var(--lift), 0 10px 32px rgba(244,63,94,0.06);
+  }
+  .kv { display: flex; flex-direction: column; gap: 1px; }
+  .kv span { color: var(--muted); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; }
+  .kv b { font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 600; font-size: 14px; }
+  .side { font-weight: 700; letter-spacing: 0.06em; font-size: 13px; }
+  .side.buy { color: var(--green); }
+  .side.sell { color: var(--red); }
+  .pnl { margin-left: auto; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 28px; font-weight: 700; letter-spacing: -0.04em; }
   .up { color: var(--green); }
   .down { color: var(--red); }
-  .hero { margin-top: 10px; padding: 14px 16px 12px; display: grid; grid-template-columns: 1fr auto; gap: 8px 16px; align-items: end; }
-  .kicker { color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
-  .hero h1 { margin: 2px 0 0; font-size: 28px; letter-spacing: -0.03em; }
-  .hero h1 em { font-style: normal; color: var(--muted); font-size: 16px; font-weight: 600; margin-left: 8px; }
-  .count { font-size: 28px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--gold); }
-  .line { grid-column: 1 / -1; font-size: 16px; }
-  .facts { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin-top: 4px; }
-  .fact { background: #0b0e14; border-radius: 8px; padding: 8px 10px; }
-  .fact span { display: block; color: var(--muted); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
-  .fact b { font-variant-numeric: tabular-nums; font-size: 14px; }
-  .verdict { grid-column: 1 / -1; font-size: 18px; font-weight: 750; }
-  .panel { margin-top: 10px; padding: 10px 12px 12px; }
-  .panel h2 { margin: 0 0 8px; color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; font-weight: 650; }
-  .px { color: var(--muted); font-variant-numeric: tabular-nums; }
-  .px b { color: var(--text); }
+  .hero { padding: 18px 18px 16px; display: grid; grid-template-columns: 1fr auto; gap: 6px 18px; align-items: end; }
+  .hero.next {
+    border-color: rgba(227,179,65,0.34);
+    background:
+      linear-gradient(180deg, rgba(227,179,65,0.09), transparent 70px),
+      var(--card);
+    box-shadow: var(--lift), 0 14px 40px rgba(227,179,65,0.05);
+  }
+  .hero h1 { margin: 2px 0 0; font-family: var(--mono); font-weight: 700; font-size: 30px; letter-spacing: -0.045em; }
+  .hero h1 em { font-style: normal; color: var(--muted); font-size: 15px; font-weight: 500; margin-left: 10px; }
+  .count { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 28px; font-weight: 700; color: var(--gold); letter-spacing: -0.04em; }
+  .line { grid-column: 1 / -1; color: #c5ceda; font-size: 15px; margin-top: 2px; }
+  .facts { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .fact {
+    flex: 1 1 190px;
+    background: var(--card-2);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 9px 12px;
+    box-shadow: var(--lift);
+  }
+  .fact b { display: block; margin-top: 3px; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 13px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.35; }
+  .verdict { grid-column: 1 / -1; margin-top: 4px; font-family: var(--mono); font-size: 15px; font-weight: 600; letter-spacing: -0.02em; }
+  .panel { padding: 14px 14px 12px; }
+  .panel h2 { margin: 0 0 10px; font-weight: 600; }
+  .head-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; min-width: 0; }
+  .head-row h2 { margin: 0; }
+  .px { min-width: 0; color: var(--muted); font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 12px; }
+  .px b { color: var(--text); font-weight: 600; }
+  .px b.wide { color: var(--red); }
+  td.read { color: #c5ceda; font-family: var(--sans); font-size: 13.5px; }
+  tbody tr.next { background: rgba(16,185,129,0.045); }
+  tbody tr.next:hover { background: rgba(16,185,129,0.08); }
+  tbody tr.later { background: rgba(227,179,65,0.035); }
   .wide { color: var(--red); }
-  svg { width: 100%; height: auto; display: block; background: #0b0e14; border-radius: 8px; }
-  table { width: 100%; border-collapse: collapse; }
-  th { text-align: left; color: var(--muted); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; font-weight: 650; padding: 0 8px 6px 0; }
-  td { padding: 7px 10px 7px 0; border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; vertical-align: middle; }
-  .badge { display: inline-block; min-width: 72px; text-align: center; border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 750; letter-spacing: .04em; }
-  .badge.done { color: var(--muted); background: #1c2433; }
-  .badge.next { color: #04210c; background: var(--green); }
-  .badge.off { color: #6e7681; background: transparent; border: 1px solid var(--line); }
-  .badge.later { color: var(--gold); background: rgba(227, 179, 65, .12); }
-  #fills:empty, #fills.hide { display: none; }
-  .tick { animation: tick .45s ease; }
-  @keyframes tick { from { background: rgba(227, 179, 65, .35); } }
+  .chart-frame { width: 100%; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: #0c1018; }
+  canvas { display: block; width: 100%; max-width: 100%; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th:nth-child(1), td:nth-child(1) { width: 16%; }
+  th:nth-child(2), td:nth-child(2) { width: 28%; }
+  th:nth-child(3), td:nth-child(3) { width: 24%; }
+  th:nth-child(4), td:nth-child(4) { width: 32%; }
+  th { text-align: left; font-weight: 600; padding: 0 12px 8px 12px; }
+  td {
+    padding: 11px 12px;
+    border-top: 1px solid var(--line);
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    vertical-align: middle;
+  }
+  td.name { font-family: var(--sans); font-size: 14px; }
+  tbody tr { transition: background .15s ease; }
+  tbody tr:hover { background: rgba(255,255,255,0.03); }
+  .badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 84px; border-radius: 999px; padding: 3px 10px;
+    font-family: var(--sans); font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+    border: 1px solid transparent;
+  }
+  .badge.done { color: #9aa3af; background: rgba(255,255,255,0.04); }
+  .badge.next { color: #6ee7b7; background: rgba(16,185,129,0.12); border-color: rgba(16,185,129,0.32); }
+  .badge.off { color: #6e7681; background: transparent; border-color: var(--line); }
+  .badge.later { color: #f0d78c; background: rgba(227,179,65,0.10); border-color: rgba(227,179,65,0.28); }
+  #fills.hide { display: none; }
+  @media (max-width: 760px) {
+    body { padding: 12px 12px 32px; }
+    .top { flex-wrap: wrap; padding: 10px 12px; align-items: flex-start; }
+    .metrics { flex: 1 1 100%; gap: 8px 0; }
+    .metric { flex: 1 1 46%; padding: 6px 10px; }
+    .metric + .metric { box-shadow: none; }
+    .pill { margin: 8px 0 2px 10px; }
+    .hero { grid-template-columns: 1fr; }
+    .hero h1 { font-size: 24px; }
+    .hero h1 em { display: inline-block; margin: 4px 0 0; }
+    .count { font-size: 22px; justify-self: start; }
+    .head-row { flex-direction: column; align-items: flex-start; gap: 4px; }
+    .badge { min-width: 0; padding: 3px 8px; }
+    td, th { padding-left: 8px; padding-right: 8px; }
+    .pnl { margin-left: 0; width: 100%; font-size: 26px; }
+    .fact { flex-basis: 100%; }
+  }
 </style>
 </head>
 <body>
-<header class="top" id="top"></header>
-<div class="trade flat" id="trade">Flat</div>
-<section class="hero" id="hero"></section>
-<section class="panel">
-  <h2 id="chart-head">US100.cash · M5</h2>
-  <svg id="chart" viewBox="0 0 820 400" preserveAspectRatio="none"></svg>
+<div class="shell">
+<header class="top card" id="top"></header>
+<div class="trade card flat" id="trade">Flat</div>
+<section class="hero card" id="hero"></section>
+<section class="panel card">
+  <div class="head-row" id="chart-head"><h2>US100.cash · M5</h2></div>
+  <div class="chart-frame"><canvas id="chart"></canvas></div>
 </section>
-<section class="panel">
+<section class="panel card">
   <h2>Today's windows</h2>
   <table>
     <thead><tr><th>London</th><th>Setup</th><th>Status</th><th>Readout</th></tr></thead>
     <tbody id="windows"></tbody>
   </table>
 </section>
-<section class="panel hide" id="fills">
+<section class="panel card hide" id="fills">
   <h2>Today's fills</h2>
   <table>
     <thead><tr><th>London</th><th>Side</th><th>Lots</th><th>Price</th><th>Result</th></tr></thead>
     <tbody id="fill-rows"></tbody>
   </table>
 </section>
+</div>
 <script>
 function esc(s) {
   return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
@@ -137,81 +269,207 @@ function plainMoney(n) {
   return "$" + Number(n).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
 }
 function cls(n) { return n > 0 ? "up" : (n < 0 ? "down" : ""); }
-function htag(parts, y, price, color, text, x0, x1, dash) {
-  const yy = y(price);
-  const dashAttr = dash ? ' stroke-dasharray="5 4"' : "";
-  parts.push('<line x1="'+x0+'" x2="'+x1+'" y1="'+yy+'" y2="'+yy+'" stroke="'+color+'" stroke-width="1.2"'+dashAttr+'/>');
-  const w = Math.max(52, text.length * 6.6);
-  parts.push('<rect x="'+(x1+4)+'" y="'+(yy-8)+'" width="'+w+'" height="16" rx="3" fill="'+color+'"/>');
-  parts.push('<text x="'+(x1+4+w/2)+'" y="'+(yy+4)+'" fill="#111" font-weight="700" font-size="11" text-anchor="middle">'+text+'</text>');
+function metric(label, value, extra) {
+  return '<div class="metric"><span>'+label+'</span><b class="num'+(extra ? " "+extra : "")+'">'+value+'</b></div>';
 }
-function draw(chart) {
-  const svg = document.getElementById("chart");
-  const bars = (chart && chart.bars) || [];
-  if (!bars.length) { svg.innerHTML = ""; return; }
-  const levels = chart.levels || [];
-  const left = 8, right = 730, top = 14, bottom = 368;
-  let lo = Math.min(...bars.map(b => b.l));
-  let hi = Math.max(...bars.map(b => b.h));
-  levels.forEach(level => { lo = Math.min(lo, level.price); hi = Math.max(hi, level.price); });
-  const pad = Math.max(hi - lo, 1) * 0.08;
-  lo -= pad; hi += pad;
-  const span = hi - lo;
-  const y = p => top + (hi - p) / span * (bottom - top);
-  const cw = (right - left) / bars.length;
-  const parts = [];
-  for (let i = 0; i <= 4; i++) {
-    const p = lo + span * i / 4;
-    const yy = y(p);
-    parts.push('<line x1="'+left+'" x2="'+right+'" y1="'+yy+'" y2="'+yy+'" stroke="#1b2230"/>');
-    parts.push('<text x="738" y="'+(yy+4)+'" fill="#8b949e" font-size="11">'+p.toFixed(1)+'</text>');
+function parsePx(text) {
+  const n = Number(String(text == null ? "" : text).replace(/,/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
+function roundRect(ctx, x, y, w, h, r) {
+  const rr = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
+}
+let lastChart = null;
+function draw(chart, retry) {
+  lastChart = chart;
+  const canvas = document.getElementById("chart");
+  const frame = canvas.parentElement;
+  canvas.style.width = "100%";
+  const cssW = frame.clientWidth;
+  if (cssW < 20) {
+    if (!retry) requestAnimationFrame(() => { if (lastChart) draw(lastChart, true); });
+    return;
   }
+  const cssH = cssW < 640 ? 260 : 380;
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  const bw = Math.round(cssW * dpr);
+  const bh = Math.round(cssH * dpr);
+  if (canvas.width !== bw || canvas.height !== bh) {
+    canvas.width = bw;
+    canvas.height = bh;
+  }
+  canvas.style.width = "100%";
+  canvas.style.height = cssH + "px";
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = "#0c1018";
+  ctx.fillRect(0, 0, cssW, cssH);
+  const bars = (chart && chart.bars) || [];
+  if (!bars.length) {
+    ctx.fillStyle = "#7d8590";
+    ctx.font = "500 13px Inter, sans-serif";
+    ctx.fillText("Waiting for bars", 16, 28);
+    return;
+  }
+  const compact = cssW < 560;
+  const tags = [];
+  (chart.levels || []).forEach(level => {
+    const price = Number(level.price);
+    if (!Number.isFinite(price)) return;
+    const priceText = price.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    const label = String(level.label || "");
+    const text = (!compact && /^[+-]/.test(label)) ? (label + "  " + priceText) : priceText;
+    tags.push({price: price, color: level.color || "#e8edf5", dash: !!level.dash, text: text, kind: "level"});
+  });
+  const bid = parsePx(chart.bid);
+  if (bid != null) {
+    tags.push({
+      price: bid,
+      color: "#f4f7fb",
+      dash: false,
+      text: bid.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2}),
+      kind: "bid"
+    });
+  }
+  ctx.font = '600 11px "JetBrains Mono", Consolas, monospace';
+  let gutter = 72;
+  tags.forEach(tag => { gutter = Math.max(gutter, ctx.measureText(tag.text).width + 20); });
+  gutter = Math.min(gutter, Math.max(88, cssW * 0.38));
+  const left = 10, right = Math.max(left + 40, cssW - gutter - 6), top = 16, bottom = cssH - 14;
+  let lo = Math.min.apply(null, bars.map(b => b.l));
+  let hi = Math.max.apply(null, bars.map(b => b.h));
+  tags.forEach(tag => { lo = Math.min(lo, tag.price); hi = Math.max(hi, tag.price); });
+  const pad = Math.max(hi - lo, 1) * 0.1;
+  lo -= pad; hi += pad;
+  const span = hi - lo || 1;
+  const yOf = p => top + (hi - p) / span * (bottom - top);
+  ctx.strokeStyle = "rgba(255,255,255,0.04)";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const yy = Math.round(yOf(lo + span * i / 4)) + 0.5;
+    ctx.beginPath();
+    ctx.moveTo(left, yy);
+    ctx.lineTo(right, yy);
+    ctx.stroke();
+  }
+  const slot = (right - left) / bars.length;
   bars.forEach((b, i) => {
-    const x = left + i * cw + cw * 0.5;
+    const x = left + i * slot + slot * 0.5;
     const up = b.c >= b.o;
-    const color = up ? "#3fb950" : "#f85149";
-    parts.push('<line x1="'+x+'" x2="'+x+'" y1="'+y(b.h)+'" y2="'+y(b.l)+'" stroke="'+color+'" stroke-width="1.1"/>');
-    const y1 = y(Math.max(b.o, b.c));
-    const y2 = y(Math.min(b.o, b.c));
-    parts.push('<rect x="'+(x-Math.max(1.1, cw*0.32))+'" y="'+y1+'" width="'+Math.max(2.2, cw*0.64)+'" height="'+Math.max(1.2, y2-y1)+'" fill="'+color+'"/>');
+    const color = up ? "#10b981" : "#f43f5e";
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(Math.round(x) + 0.5, yOf(b.h));
+    ctx.lineTo(Math.round(x) + 0.5, yOf(b.l));
+    ctx.stroke();
+    const bodyW = Math.max(1.6, slot * 0.66);
+    const y1 = yOf(Math.max(b.o, b.c));
+    const y2 = yOf(Math.min(b.o, b.c));
+    ctx.fillStyle = color;
+    ctx.fillRect(x - bodyW / 2, y1, bodyW, Math.max(1, y2 - y1));
   });
-  levels.forEach(level => {
-    htag(parts, y, level.price, level.color, esc(level.label), left, right, level.dash);
+  tags.forEach(tag => {
+    if (tag.kind === "bid") return;
+    const yy = Math.round(yOf(tag.price)) + 0.5;
+    ctx.save();
+    ctx.strokeStyle = tag.color;
+    ctx.globalAlpha = tag.dash ? 0.55 : 0.9;
+    ctx.lineWidth = 1;
+    ctx.setLineDash(tag.dash ? [3, 4] : []);
+    ctx.beginPath();
+    ctx.moveTo(left, yy);
+    ctx.lineTo(right, yy);
+    ctx.stroke();
+    ctx.restore();
   });
-  svg.innerHTML = parts.join("");
+  if (bid != null) {
+    const yy = Math.round(yOf(bid)) + 0.5;
+    ctx.save();
+    ctx.strokeStyle = "rgba(244,247,251,0.7)";
+    ctx.setLineDash([2, 3]);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(left, yy);
+    ctx.lineTo(right, yy);
+    ctx.stroke();
+    ctx.restore();
+  }
+  const placed = tags.map(tag => ({tag: tag, y: yOf(tag.price)}));
+  placed.sort((a, b) => a.y - b.y);
+  const pillH = 18;
+  for (let i = 1; i < placed.length; i++) {
+    const minY = placed[i - 1].y + pillH + 3;
+    if (placed[i].y < minY) placed[i].y = minY;
+  }
+  if (placed.length && placed[placed.length - 1].y > bottom - 2) {
+    const shift = placed[placed.length - 1].y - (bottom - 2);
+    placed.forEach(item => { item.y -= shift; });
+  }
+  if (placed.length && placed[0].y < top + 8) {
+    const shift = top + 8 - placed[0].y;
+    placed.forEach(item => { item.y += shift; });
+  }
+  ctx.font = '600 11px "JetBrains Mono", Consolas, monospace';
+  ctx.textBaseline = "middle";
+  placed.forEach(item => {
+    const tag = item.tag;
+    const tw = ctx.measureText(tag.text).width;
+    const w = Math.min(tw + 14, cssW - right - 10);
+    const x = right + 8;
+    const y = item.y - pillH / 2;
+    ctx.fillStyle = tag.color;
+    roundRect(ctx, x, y, w, pillH, 6);
+    ctx.fill();
+    ctx.fillStyle = "#0b0e14";
+    ctx.fillText(tag.text, x + 7, item.y + 0.5);
+  });
 }
+window.addEventListener("resize", () => { if (lastChart) draw(lastChart); });
 function render(data) {
-  const top = document.getElementById("top");
   const day = data.day_pnl;
-  top.innerHTML =
-    '<div class="clock"><span>London</span><b>'+esc(data.london)+'</b></div>' +
-    '<div class="clock"><span>New York</span><b>'+esc(data.ny)+'</b></div>' +
-    '<div class="stat"><span>Balance</span><b>'+plainMoney(data.balance)+'</b></div>' +
-    '<div class="stat"><span>Equity</span><b>'+plainMoney(data.equity)+'</b></div>' +
-    '<div class="stat"><span>Today</span><b class="'+cls(day)+'">'+money(day)+'</b></div>' +
-    '<div class="pill '+(data.trading === "LIVE" ? "live" : "locked")+'">'+esc(data.trading || "LOCKED")+'</div>';
+  document.getElementById("top").innerHTML =
+    '<div class="metrics">' +
+      metric("London", esc(data.london)) +
+      metric("New York", esc(data.ny)) +
+      metric("Balance", plainMoney(data.balance)) +
+      metric("Equity", plainMoney(data.equity)) +
+      metric("Today", money(day), cls(day)) +
+    '</div>' +
+    '<div class="pill '+(data.trading === "LIVE" ? "live" : "locked")+'"><i></i>'+esc(data.trading || "LOCKED")+'</div>';
 
   const trade = document.getElementById("trade");
   const pos = data.position;
   if (!pos) {
-    trade.className = "trade flat";
+    trade.className = "trade card flat";
     trade.innerHTML = "Flat";
   } else {
-    trade.className = "trade live";
+    const side = String(pos.side || "");
+    trade.className = "trade card live " + side;
     trade.innerHTML =
-      '<b>'+esc(pos.symbol)+'</b>' +
-      '<span class="side '+esc(pos.side)+'">'+esc(pos.side.toUpperCase())+'</span>' +
-      '<span>'+esc(pos.volume)+' lots</span>' +
-      '<span>Entry '+esc(pos.entry)+'</span>' +
-      '<span>SL '+esc(pos.sl)+'</span>' +
-      '<span>TP '+esc(pos.tp)+'</span>' +
-      '<span class="pnl '+cls(pos.pnl)+'" data-k="pnl">'+money(pos.pnl)+'</span>';
+      '<div class="kv"><span>Symbol</span><b>'+esc(pos.symbol)+'</b></div>' +
+      '<div class="kv"><span>Side</span><b class="side '+esc(side)+'">'+esc(side.toUpperCase())+'</b></div>' +
+      '<div class="kv"><span>Lots</span><b>'+esc(pos.volume)+'</b></div>' +
+      '<div class="kv"><span>Entry</span><b>'+esc(pos.entry)+'</b></div>' +
+      '<div class="kv"><span>SL</span><b>'+esc(pos.sl)+'</b></div>' +
+      '<div class="kv"><span>TP</span><b>'+esc(pos.tp)+'</b></div>' +
+      '<div class="pnl '+cls(pos.pnl)+'">'+money(pos.pnl)+'</div>';
   }
 
   const hero = data.hero || {};
+  const heroEl = document.getElementById("hero");
+  const hot = hero.kicker === "Next trade check" || hero.kicker === "Checking now";
+  heroEl.className = "hero card" + (hot ? " next" : "");
   const facts = (hero.facts || []).map(f =>
     '<div class="fact"><span>'+esc(f.k)+'</span><b>'+esc(f.v)+'</b></div>').join("");
-  document.getElementById("hero").innerHTML =
+  heroEl.innerHTML =
     '<div><div class="kicker">'+esc(hero.kicker || "")+'</div><h1>'+esc(hero.title || "")+'<em>'+esc(hero.ny || "")+'</em></h1></div>' +
     '<div class="count">'+esc(hero.countdown || "")+'</div>' +
     (hero.line ? '<div class="line">'+esc(hero.line)+'</div>' : '') +
@@ -219,13 +477,13 @@ function render(data) {
     (hero.verdict ? '<div class="verdict">'+esc(hero.verdict)+'</div>' : '');
 
   const chart = data.chart || {};
-  const spreadCls = chart.spread_wide ? " wide" : "";
   document.getElementById("chart-head").innerHTML =
-    'US100.cash · M5 <span class="px">Bid <b>'+esc(chart.bid || "—")+'</b> · Ask <b>'+esc(chart.ask || "—")+'</b> · Spread <b class="'+spreadCls.trim()+'">'+esc(chart.spread || "—")+'</b></span>';
+    '<h2>US100.cash · M5</h2>' +
+    '<div class="px">Bid <b>'+esc(chart.bid || "—")+'</b> · Ask <b>'+esc(chart.ask || "—")+'</b> · Spread <b class="'+(chart.spread_wide ? "wide" : "")+'">'+esc(chart.spread || "—")+'</b></div>';
   draw(chart);
 
   document.getElementById("windows").innerHTML = (data.windows || []).map(row =>
-    '<tr><td><b>'+esc(row.time)+'</b></td><td>'+esc(row.name)+'</td><td><span class="badge '+esc(row.status)+'">'+esc(row.badge)+'</span></td><td>'+esc(row.readout)+'</td></tr>'
+    '<tr class="'+esc(row.status)+'"><td><b>'+esc(row.time)+'</b></td><td class="name">'+esc(row.name)+'</td><td><span class="badge '+esc(row.status)+'">'+esc(row.badge)+'</span></td><td class="read">'+esc(row.readout)+'</td></tr>'
   ).join("");
 
   const fills = data.fills || [];
@@ -239,7 +497,9 @@ async function tick() {
   try {
     render(await (await fetch("/api")).json());
   } catch (err) {
-    document.getElementById("hero").innerHTML = '<div><div class="kicker">Waiting</div><h1>Viewer offline</h1></div>';
+    const heroEl = document.getElementById("hero");
+    heroEl.className = "hero card";
+    heroEl.innerHTML = '<div><div class="kicker">Waiting</div><h1>Viewer offline</h1></div>';
   }
 }
 tick();
