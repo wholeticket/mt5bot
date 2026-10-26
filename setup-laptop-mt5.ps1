@@ -139,7 +139,8 @@ $dialogKeys = @(
     @("DateFrom", "$fromUnix"),
     @("DateTo", "$toUnix"),
     @("Deposit", "100000.00"),
-    @("Currency", "USD")
+    @("Currency", "USD"),
+    @("Model", "4")
 )
 $commonKeys = @(
     @("Expert", "RobustForexEA.ex5"),
@@ -157,6 +158,12 @@ foreach ($folder in $folders) {
     Copy-Item $srcExpert (Join-Path $experts "RobustForexEA.mq5") -Force
     Copy-Item $srcEx5 (Join-Path $experts "RobustForexEA.ex5") -Force
     Copy-Item $srcSet (Join-Path $tester "RobustForexEA.set") -Force
+    $includeSrc = Join-Path $root "MQL5\Include\RobustForex"
+    $includeDest = Join-Path $folder.FullName "MQL5\Include\RobustForex"
+    if (Test-Path $includeSrc) {
+        New-Item -ItemType Directory -Force -Path $includeDest | Out-Null
+        Copy-Item (Join-Path $includeSrc "*.mqh") $includeDest -Force
+    }
     $iniName = "RobustForexEA.US100.cash.M5.20260101_20261026.400.ini"
     Write-MtText (Join-Path $tester $iniName) (($profile -join "`r`n") + "`r`n") $false
     Update-IniSection (Join-Path $folder.FullName "config\terminal.ini") "Tester" $dialogKeys
@@ -164,6 +171,7 @@ foreach ($folder in $folders) {
 }
 
 Write-Output ""
-Write-Output "Strategy Tester is set to RobustForexEA.ex5, US100.cash, M5, 2026.01.01-2026.10.26, v6.50 inputs."
-Write-Output "Close MetaTrader if it is open, then start it again and open View -> Strategy Tester."
+Write-Output "Strategy Tester is set to RobustForexEA.ex5, US100.cash, M5, real ticks, 2026.01.01-2026.10.26, v6.50 inputs."
+Write-Output "A full 2026 M5 test is about 57,000 bars. About 11,000 bars means the period was not M5, and this book then takes 0 trades."
+Write-Output "Close MetaTrader if it is open, then start it again and open View -> Strategy Tester. Leave the period on M5."
 Write-Output "Not started for you, so a live terminal stays untouched."

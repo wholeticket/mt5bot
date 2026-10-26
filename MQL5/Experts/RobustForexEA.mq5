@@ -453,6 +453,17 @@ int OnInit(void)
       PrintFormat("EA|event=init_failed|reason=symbol_select|symbol=%s|error=%d",_Symbol,GetLastError());
       return INIT_FAILED;
      }
+   // The 5-rule book only sees M5 bars (03:30, 09:30, 10:00, 11:00, 13:00, 14:30 NY).
+   // Strategy Tester cannot build M5 when the selected period is M15 or higher,
+   // so iTime(M5) never advances and the report finishes with 0 trades.
+   if((bool)MQLInfoInteger(MQL_TESTER) &&
+      (Period()!=PERIOD_M5 || StringFind(_Symbol,"US100")<0))
+     {
+      PrintFormat("EA|event=init_failed|reason=tester_setup|symbol=%s|period=%s|need=US100.cash,M5,real ticks",
+                  _Symbol,EnumToString(Period()));
+      Print("A 2026 US100.cash M5 real-tick test is about 57,000 bars and 80 million ticks. About 11,000 bars means this was not that test, so no M5 signal was visible.");
+      return INIT_FAILED;
+     }
 
    g_risk.Initialize();
    g_trades.Initialize(InpMagicNumber,InpDeviationPoints,GetPointer(g_risk));

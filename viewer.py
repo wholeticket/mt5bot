@@ -1037,6 +1037,10 @@ SETUP_FILES = {
     "/RobustForexEA.ex5": ROOT / "MQL5" / "Experts" / "RobustForexEA.ex5",
     "/RobustForexEA.mq5": ROOT / "MQL5" / "Experts" / "RobustForexEA.mq5",
     "/RobustForexEA.set": ROOT / "MQL5" / "Profiles" / "Tester" / "RobustForexEA.set",
+    "/Include/RobustForex/Strategy.mqh": ROOT / "MQL5" / "Include" / "RobustForex" / "Strategy.mqh",
+    "/Include/RobustForex/OpeningRange.mqh": ROOT / "MQL5" / "Include" / "RobustForex" / "OpeningRange.mqh",
+    "/Include/RobustForex/RiskManager.mqh": ROOT / "MQL5" / "Include" / "RobustForex" / "RiskManager.mqh",
+    "/Include/RobustForex/TradeManager.mqh": ROOT / "MQL5" / "Include" / "RobustForex" / "TradeManager.mqh",
 }
 
 SETUP_PS1 = r"""# Install RobustForexEA v6.50 into every MT5 data folder on this PC.
@@ -1046,10 +1050,21 @@ $base = "__BASE__"
 $work = Join-Path $env:TEMP "mt5bot-setup"
 New-Item -ItemType Directory -Force -Path $work | Out-Null
 $ProgressPreference = "SilentlyContinue"
-foreach ($name in @("RobustForexEA.mq5", "RobustForexEA.ex5", "RobustForexEA.set")) {
-    $out = Join-Path $work $name
-    Invoke-WebRequest -Uri "$base/$name" -OutFile $out -UseBasicParsing
-    if ((Get-Item $out).Length -lt 32) { throw "Download of $name from $base looks empty." }
+$downloads = @(
+    @{ Url = "RobustForexEA.mq5"; Out = "RobustForexEA.mq5" },
+    @{ Url = "RobustForexEA.ex5"; Out = "RobustForexEA.ex5" },
+    @{ Url = "RobustForexEA.set"; Out = "RobustForexEA.set" },
+    @{ Url = "Include/RobustForex/Strategy.mqh"; Out = "Include\RobustForex\Strategy.mqh" },
+    @{ Url = "Include/RobustForex/OpeningRange.mqh"; Out = "Include\RobustForex\OpeningRange.mqh" },
+    @{ Url = "Include/RobustForex/RiskManager.mqh"; Out = "Include\RobustForex\RiskManager.mqh" },
+    @{ Url = "Include/RobustForex/TradeManager.mqh"; Out = "Include\RobustForex\TradeManager.mqh" }
+)
+foreach ($item in $downloads) {
+    $out = Join-Path $work $item.Out
+    $dir = Split-Path $out
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+    Invoke-WebRequest -Uri "$base/$($item.Url)" -OutFile $out -UseBasicParsing
+    if ((Get-Item $out).Length -lt 32) { throw "Download of $($item.Url) from $base looks empty." }
 }
 $srcExpert = Join-Path $work "RobustForexEA.mq5"
 $srcEx5 = Join-Path $work "RobustForexEA.ex5"
@@ -1185,7 +1200,8 @@ $dialogKeys = @(
     @("DateFrom", "$fromUnix"),
     @("DateTo", "$toUnix"),
     @("Deposit", "100000.00"),
-    @("Currency", "USD")
+    @("Currency", "USD"),
+    @("Model", "4")
 )
 $commonKeys = @(
     @("Expert", "RobustForexEA.ex5"),
@@ -1203,6 +1219,9 @@ foreach ($folder in $folders) {
     Copy-Item $srcExpert (Join-Path $experts "RobustForexEA.mq5") -Force
     Copy-Item $srcEx5 (Join-Path $experts "RobustForexEA.ex5") -Force
     Copy-Item $srcSet (Join-Path $tester "RobustForexEA.set") -Force
+    $includeDest = Join-Path $folder.FullName "MQL5\Include\RobustForex"
+    New-Item -ItemType Directory -Force -Path $includeDest | Out-Null
+    Copy-Item (Join-Path $work "Include\RobustForex\*.mqh") $includeDest -Force
     $iniName = "RobustForexEA.US100.cash.M5.20260101_20261026.400.ini"
     Write-MtText (Join-Path $tester $iniName) (($profile -join "`r`n") + "`r`n") $false
     Update-IniSection (Join-Path $folder.FullName "config\terminal.ini") "Tester" $dialogKeys
@@ -1210,8 +1229,9 @@ foreach ($folder in $folders) {
 }
 
 Write-Output ""
-Write-Output "Strategy Tester is set to RobustForexEA.ex5, US100.cash, M5, 2026.01.01-2026.10.26, v6.50 inputs."
-Write-Output "Close MetaTrader if it is open, then start it again and open View -> Strategy Tester."
+Write-Output "Strategy Tester is set to RobustForexEA.ex5, US100.cash, M5, real ticks, 2026.01.01-2026.10.26, v6.50 inputs."
+Write-Output "A full 2026 M5 test is about 57,000 bars. About 11,000 bars means the period was not M5, and this book then takes 0 trades."
+Write-Output "Close MetaTrader if it is open, then start it again and open View -> Strategy Tester. Leave the period on M5."
 """
 
 
